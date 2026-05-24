@@ -14,7 +14,8 @@ sudo apt update
 # - libgl1 และ libglib2.0-0 : สำหรับระบบจัดการภาพของ OpenCV
 # - python3-lgpio, swig, python3-dev, build-essential, liblgpio-dev : สำหรับบิลด์ระบบ GPIO
 echo "[2/4] Installing system dependencies via apt..."
-sudo apt install -y python3-pip libgl1 libglib2.0-0 python3-lgpio swig python3-dev build-essential liblgpio-dev
+sudo apt install -y python3-pip "numpy<2.0.0" libgl1 libglib2.0-0 python3-lgpio swig python3-dev build-essential liblgpio-dev
+
 
 # 3. สร้างและเปิดใช้งาน Virtual Environment
 echo "[3/4] Setting up Python Virtual Environment..."
@@ -29,4 +30,4 @@ echo "=========================================="
 echo "  Installation Completed Successfully!"
 echo "=========================================="
 echo "To setup the auto-start service, run:"
-echo "  ./setup_service.sh"
+./setup_service.sh
