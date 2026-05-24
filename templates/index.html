@@ -29,6 +29,18 @@
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center; flex-direction: column;
         }
+
+        /* กล่องแสดง System Stats */
+        .stat-box {
+            background-color: #212529;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            border: 1px solid #373b3e;
+            transition: all 0.3s;
+        }
+        .stat-box:hover { border-color: #0dcaf0; }
+        .stat-value { font-size: 1.5rem; font-weight: bold; margin-top: 10px; font-family: monospace;}
     </style>
 </head>
 <body>
@@ -53,6 +65,38 @@
     </nav>
 
     <div class="container-fluid px-4">
+        
+        <div class="row mb-4">
+            <div class="col-md-3 mb-3 mb-md-0">
+                <div class="stat-box">
+                    <div class="text-info"><i class="fa-solid fa-microchip fa-2x"></i></div>
+                    <div class="text-muted mt-2">CPU USAGE</div>
+                    <div class="stat-value text-light" id="sys-cpu">-- %</div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
+                <div class="stat-box">
+                    <div class="text-success"><i class="fa-solid fa-memory fa-2x"></i></div>
+                    <div class="text-muted mt-2">RAM USAGE <span id="sys-ram-details" style="font-size:0.7em;"></span></div>
+                    <div class="stat-value text-light" id="sys-ram">-- %</div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
+                <div class="stat-box">
+                    <div class="text-danger"><i class="fa-solid fa-temperature-half fa-2x"></i></div>
+                    <div class="text-muted mt-2">BOARD TEMP</div>
+                    <div class="stat-value text-light" id="sys-temp">-- °C</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-box">
+                    <div class="text-warning"><i class="fa-solid fa-hard-drive fa-2x"></i></div>
+                    <div class="text-muted mt-2">DISK USAGE</div>
+                    <div class="stat-value text-light" id="sys-disk">-- %</div>
+                </div>
+            </div>
+        </div>
+
         <div class="card p-3 shadow-sm mb-4">
             <div class="row align-items-center">
                 <div class="col-md-3">
@@ -99,6 +143,27 @@
     </div>
 
     <script>
+        // 0. ฟังก์ชันอัปเดตสถานะระบบ (ทำงานอัตโนมัติ)
+        async function fetchSystemStats() {
+            try {
+                const response = await fetch('/api/system_stats');
+                const data = await response.json();
+                if(data.status === "ok") {
+                    document.getElementById('sys-cpu').innerText = data.cpu_percent + ' %';
+                    document.getElementById('sys-ram').innerText = data.ram_percent + ' %';
+                    document.getElementById('sys-ram-details').innerText = `(${data.ram_used_mb}MB)`;
+                    document.getElementById('sys-temp').innerText = data.temperature_c + ' °C';
+                    document.getElementById('sys-disk').innerText = data.disk_percent + ' %';
+                }
+            } catch (error) {
+                console.log("Cannot fetch system stats");
+            }
+        }
+        
+        // สั่งรันครั้งแรกและตั้งเวลาดึงข้อมูลทุกๆ 3 วินาที
+        fetchSystemStats();
+        setInterval(fetchSystemStats, 3000);
+
         // 1. ฟังก์ชันสแกนเร็ว (ดึงข้อมูล 1-254)
         async function startQuickScan() {
             const subnet = document.getElementById('subnet').value;
