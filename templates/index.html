@@ -58,7 +58,7 @@
                 <span class="navbar-text me-4 text-light border border-secondary rounded px-3 py-1 bg-dark">
                     <i class="fa-solid fa-server text-warning"></i> Local IP: <strong class="text-info">{{ local_ip }}</strong>
                 </span>
-                <a href="/live" target="_blank" class="btn btn-outline-danger btn-sm me-2 fw-bold"><i class="fa-solid fa-video"></i> CCTV Viewer</a>
+                <a href="/camera" target="_blank" class="btn btn-outline-danger btn-sm me-2 fw-bold"><i class="fa-solid fa-video"></i> CCTV Viewer</a>
                 <a href="/servo" target="_blank" class="btn btn-outline-warning btn-sm fw-bold"><i class="fa-solid fa-robot"></i> Servo Controller</a>
             </div>
         </div>
@@ -205,8 +205,8 @@
                     
                     // สมองกล: ถ้าเจอกล้องวงจรปิด (พอร์ต RTSP/NVR) สร้างปุ่มดูภาพ
                     if (device.ports.includes(554) || device.ports.includes(37777) || device.ports.includes(34567) || device.badge_class === 'bg-camera') {
-                        // ส่งไปหน้า /live หรือเรียก /video_feed ได้เลย
-                        actionButtons += `<a href="/live?ip=${device.ip}" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm"><i class="fa-solid fa-play"></i> Live View</a>`;
+                        // ส่งไปหน้า /camera
+                        actionButtons += `<a href="/camera?ip=${device.ip}" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm"><i class="fa-solid fa-play"></i> Live View</a>`;
                     }
                     
                     // สมองกล: ถ้าเจอเว็บแอป (80, 443, 8080) สร้างปุ่มเปิดเว็บ
