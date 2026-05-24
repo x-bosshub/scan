@@ -39,6 +39,9 @@
     </nav>
 
     <div class="container-fluid px-4">
+        <div class="alert alert-info border-info text-center fw-bold shadow-sm mb-4">
+            <i class="fa-solid fa-save"></i> การตั้งค่าในหน้านี้จะถูกบันทึก (Save) อัตโนมัติ ระบบจะโหลดค่าเดิมกลับมาเองเมื่อไฟดับหรือรีบูตเครื่อง
+        </div>
         <div class="row g-4">
             
             <div class="col-md-6">
@@ -59,7 +62,7 @@
                             <div class="input-group">
                                 <input type="number" id="gpio-pin-1" class="form-control form-control-lg bg-dark text-warning border-secondary fw-bold" placeholder="ระบุขา GPIO (เช่น 12)" min="0" max="40">
                                 <button onclick="setupServo('1')" id="setup-btn-1" class="btn btn-warning fw-bold px-4">
-                                    <i class="fa-solid fa-plug"></i> APPLY
+                                    <i class="fa-solid fa-plug"></i> APPLY & SAVE
                                 </button>
                             </div>
                             <div id="setup-status-1" class="mt-2 fw-bold text-center small"></div>
@@ -108,7 +111,7 @@
                             <div class="input-group">
                                 <input type="number" id="gpio-pin-2" class="form-control form-control-lg bg-dark text-success border-secondary fw-bold" placeholder="ระบุขา GPIO (เช่น 18)" min="0" max="40">
                                 <button onclick="setupServo('2')" id="setup-btn-2" class="btn btn-success fw-bold px-4">
-                                    <i class="fa-solid fa-plug"></i> APPLY
+                                    <i class="fa-solid fa-plug"></i> APPLY & SAVE
                                 </button>
                             </div>
                             <div id="setup-status-2" class="mt-2 fw-bold text-center small"></div>
@@ -155,6 +158,33 @@
             }
         }
 
+        async function loadSavedConfig() {
+            try {
+                const response = await fetch('/api/get_servos_status');
+                const data = await response.json();
+                
+                if (data.servo1_connected) {
+                    document.getElementById('conn-type-1').value = data.servo1_type;
+                    document.getElementById('gpio-pin-1').value = data.servo1_pin;
+                    document.getElementById('current-angle-1').innerText = data.servo1_angle + '°';
+                    document.getElementById('btn-left-1').disabled = false;
+                    document.getElementById('btn-right-1').disabled = false;
+                    document.getElementById('move-status-1').innerHTML = `<span class="text-success"><i class="fa-solid fa-check"></i> โหลดข้อมูลบันทึกล่าสุดสำเร็จ</span>`;
+                    updatePlaceholder('1');
+                }
+                
+                if (data.servo2_connected) {
+                    document.getElementById('conn-type-2').value = data.servo2_type;
+                    document.getElementById('gpio-pin-2').value = data.servo2_pin;
+                    document.getElementById('current-angle-2').innerText = data.servo2_angle + '°';
+                    document.getElementById('btn-left-2').disabled = false;
+                    document.getElementById('btn-right-2').disabled = false;
+                    document.getElementById('move-status-2').innerHTML = `<span class="text-success"><i class="fa-solid fa-check"></i> โหลดข้อมูลบันทึกล่าสุดสำเร็จ</span>`;
+                    updatePlaceholder('2');
+                }
+            } catch (error) { console.log("No previous config loaded."); }
+        }
+
         async function setupServo(servoId) {
             const pin = document.getElementById(`gpio-pin-${servoId}`).value;
             const type = document.getElementById(`conn-type-${servoId}`).value;
@@ -180,7 +210,7 @@
                 const data = await response.json();
                 
                 if(data.status === "ok") {
-                    statusDiv.innerHTML = `<span class="text-success"><i class="fa-solid fa-circle-check"></i> ${data.message}</span>`;
+                    statusDiv.innerHTML = `<span class="text-success"><i class="fa-solid fa-save"></i> ${data.message}</span>`;
                     document.getElementById(`current-angle-${servoId}`).innerText = data.current_angle + '°';
                     
                     document.getElementById(`btn-left-${servoId}`).disabled = false;
@@ -217,6 +247,9 @@
                 statusDiv.innerHTML = `<span class="text-danger"><i class="fa-solid fa-wifi"></i> ส่งคำสั่งไม่สำเร็จ</span>`;
             }
         }
+
+        // โหลดข้อมูลที่บันทึกไว้เมื่อเปิดหน้านี้
+        window.onload = loadSavedConfig;
     </script>
 </body>
 </html>
