@@ -8,6 +8,7 @@ import time
 import sys
 import psutil
 import os
+import json
 from gpiozero import AngularServo
 from gpiozero.pins.lgpio import LGPIOFactory
 from time import sleep
@@ -27,12 +28,62 @@ except Exception as e:
 
 app = Flask(__name__) 
 
-# ตัวแปร Global จัดการ Servo (รองรับ 2 ชนิด: 'gpio' และ 'pca9685')
+# ตัวแปร Global จัดการ Servo
 servos_config = {
     "1": {"connected": False, "type": "gpio", "obj": None, "pin": None, "angle": 90, "name": "ซ้าย-ขวา"},
     "2": {"connected": False, "type": "gpio", "obj": None, "pin": None, "angle": 90, "name": "ขึ้น-ลง"}
 }
 
+CONFIG_FILE = 'servo_config.json'
+
+# ==========================================
+# AUTO SAVE/LOAD SYSTEM สำหรับ Servo
+# ==========================================
+def save_servo_config():
+    """บันทึกการตั้งค่า Servo ลงไฟล์ JSON"""
+    try:
+        data_to_save = {
+            "1": {"type": servos_config["1"]["type"], "pin": servos_config["1"]["pin"]},
+            "2": {"type": servos_config["2"]["type"], "pin": servos_config["2"]["pin"]}
+        }
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(data_to_save, f)
+        print("[SYSTEM] บันทึกการตั้งค่า Servo สำเร็จ")
+    except Exception as e:
+        print(f"[ERROR] ไม่สามารถบันทึกไฟล์ตั้งค่าได้: {e}")
+
+def load_servo_config():
+    """โหลดและเชื่อมต่อ Servo อัตโนมัติเมื่อเปิดโปรแกรม"""
+    global servos_config
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                saved_data = json.load(f)
+            
+            for sid in ["1", "2"]:
+                if sid in saved_data and saved_data[sid]["pin"] is not None:
+                    conn_type = saved_data[sid]["type"]
+                    pin = int(saved_data[sid]["pin"])
+                    
+                    servos_config[sid]["type"] = conn_type
+                    servos_config[sid]["pin"] = pin
+                    servos_config[sid]["angle"] = 90
+                    
+                    if conn_type == "pca9685" and pca_available:
+                        pca_kit.servo[pin].angle = 90
+                        servos_config[sid]["connected"] = True
+                    elif conn_type == "gpio":
+                        servos_config[sid]["obj"] = AngularServo(pin, min_angle=0, max_angle=180, pin_factory=factory)
+                        servos_config[sid]["obj"].angle = 90
+                        servos_config[sid]["connected"] = True
+                        
+            print("[SYSTEM] โหลดการตั้งค่า Servo ล่าสุดสำเร็จ")
+        except Exception as e:
+            print(f"[ERROR] ไฟล์ตั้งค่าเสียหาย หรือโหลดไม่สำเร็จ: {e}")
+
+# ==========================================
+# NETWORK CORE FUNCTIONS
+# ==========================================
 COMMON_PORTS = [
     21, 22, 23,43, 53, 80, 81, 111, 443,
     554, 1935,
@@ -52,10 +103,6 @@ MAC_VENDORS = {
     "48:EA:63": "Dahua", "E0:50:8B": "Hikvision", "10:12:48": "Hikvision",
     "00:0C:29": "VMware", "00:50:56": "VMware"
 }
-
-# ==========================================
-# CORE FUNCTIONS
-# ==========================================
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -99,7 +146,6 @@ def identify_device_type(ports, vendor):
     if 111 in ports: return "Unix/Linux Device", "fa-linux", "bg-server"
 
     if any(p in ports for p in [80, 443,8000, 4000,8080, 3000, 5000,6080,7681]): return "Web Server/App", "fa-globe", "bg-light text-dark"
-
     if "Espressif" in vendor: return "ESP32 Device", "fa-microchip", "bg-iot"
     if "Apple" in vendor: return "Apple Device", "fa-apple", "bg-light text-dark"
     if "Synology" in vendor: return "NAS Storage", "fa-hdd", "bg-secondary text-white"
@@ -132,11 +178,9 @@ def quick_scan_host(ip):
             hostname = socket.gethostbyaddr(ip)[0]
         except: 
             hostname = ""
-
         mac = get_mac_address(ip)
         vendor = resolve_vendor(mac)
         type_name, icon, badge_class = identify_device_type(active_ports, vendor)
-
         return {
             'ip': ip, 'hostname': hostname, 'mac': mac, 
             'vendor': vendor, 'ports': active_ports,
@@ -145,18 +189,16 @@ def quick_scan_host(ip):
     return None
 
 # ==========================================
-# PROFESSIONAL VIDEO STREAMING LOGIC
+# VIDEO STREAMING LOGIC
 # ==========================================
 
 def generate_frames(rtsp_url):
     import os
     os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;udp|timeout;5000000"
-
     camera = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
     camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     if not camera.isOpened():
-        print(f"[ERROR] ไม่สามารถเชื่อมต่อกล้องได้: {rtsp_url}")
         return
 
     try:
@@ -165,19 +207,13 @@ def generate_frames(rtsp_url):
             if not success:
                 time.sleep(0.1) 
                 continue
-
             frame = cv2.resize(frame, (800, 450)) 
             ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-            if not ret:
-                continue
-                
+            if not ret: continue
             frame_bytes = buffer.tobytes()
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                   
-    except Exception as e:
-        print(f"[SYSTEM] Stream error: {e}")
-    finally:
-        camera.release()
+    except Exception: pass
+    finally: camera.release()
 
 @app.route('/video_feed')
 def video_feed():
@@ -186,17 +222,35 @@ def video_feed():
     pwd = request.args.get('pwd')
     path = request.args.get('path', 'onvif1') 
     port = request.args.get('port', 554)
-
     if pwd:
         rtsp_url = f"rtsp://{user}:{pwd}@{ip}:{port}/{path}"
     else:
         rtsp_url = f"rtsp://{ip}:{port}/{path}"
-        
-    print(f"[LOG] เริ่มการสตรีมจาก: {rtsp_url}")
     return Response(generate_frames(rtsp_url), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+def generate_pi_frames():
+    camera_pi = cv2.VideoCapture(0)
+    if not camera_pi.isOpened(): return
+    try:
+        while True:
+            success, frame = camera_pi.read()
+            if not success:
+                time.sleep(0.1)
+                continue
+            frame = cv2.resize(frame, (800, 450))
+            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            if not ret: continue
+            frame_bytes = buffer.tobytes()
+            yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+    except Exception: pass
+    finally: camera_pi.release()
+
+@app.route('/video_pi')
+def video_pi():
+    return Response(generate_pi_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
 # ==========================================
-# SYSTEM STATUS & HARDWARE LOGIC
+# SYSTEM STATUS & SERVO API
 # ==========================================
 
 @app.route('/api/system_stats')
@@ -204,21 +258,16 @@ def system_stats():
     cpu_usage = psutil.cpu_percent(interval=0.1)
     ram_info = psutil.virtual_memory()
     disk_info = psutil.disk_usage('/')
-    
     try:
         with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
             temp_c = float(f.read()) / 1000.0
     except:
         temp_c = 0.0 
-        
     return jsonify({
-        "status": "ok",
-        "cpu_percent": cpu_usage,
-        "ram_percent": ram_info.percent,
+        "status": "ok", "cpu_percent": cpu_usage, "ram_percent": ram_info.percent,
         "ram_used_mb": round(ram_info.used / (1024 * 1024), 2),
         "ram_total_mb": round(ram_info.total / (1024 * 1024), 2),
-        "disk_percent": disk_info.percent,
-        "temperature_c": round(temp_c, 1)
+        "disk_percent": disk_info.percent, "temperature_c": round(temp_c, 1)
     })
 
 @app.route('/api/setup_servo', methods=['POST'])
@@ -227,13 +276,12 @@ def setup_servo():
     try:
         data = request.get_json()
         servo_id = str(data.get('servo_id', '1'))
-        conn_type = data.get('type', 'gpio') # 'gpio' หรือ 'pca9685'
+        conn_type = data.get('type', 'gpio') 
         pin = int(data.get('pin'))
         
         if servo_id not in servos_config:
             return jsonify({"status": "error", "message": "ไม่พบ Servo ID ในระบบ"}), 400
             
-        # เคลียร์การเชื่อมต่อเก่าทิ้ง
         if servos_config[servo_id]["type"] == "gpio" and servos_config[servo_id]["obj"] is not None:
             servos_config[servo_id]["obj"].close()
             servos_config[servo_id]["obj"] = None
@@ -245,23 +293,17 @@ def setup_servo():
         if conn_type == "pca9685":
             if not pca_available:
                 return jsonify({"status": "error", "message": "บอร์ด PCA9685 ไม่พร้อมทำงาน หรือยังไม่ได้เปิด I2C"}), 400
-            if pin < 0 or pin > 15:
-                return jsonify({"status": "error", "message": "หมายเลขช่อง PCA9685 ต้องอยู่ระหว่าง 0 - 15"}), 400
-            
-            pca_kit.servo[pin].angle = 90 # ตั้งค่าเริ่มต้น
+            pca_kit.servo[pin].angle = 90
             servos_config[servo_id]["connected"] = True
-            
         elif conn_type == "gpio":
             servos_config[servo_id]["obj"] = AngularServo(pin, min_angle=0, max_angle=180, pin_factory=factory)
             servos_config[servo_id]["obj"].angle = 90
             servos_config[servo_id]["connected"] = True
 
-        return jsonify({
-            "status": "ok", 
-            "message": f"ตั้งค่าแบบ {conn_type.upper()} สำเร็จ", 
-            "current_angle": 90,
-            "servo_id": servo_id
-        })
+        # เซฟการตั้งค่าทันทีที่สำเร็จ
+        save_servo_config()
+
+        return jsonify({"status": "ok", "message": f"ตั้งค่าแบบ {conn_type.upper()} ขา {pin} สำเร็จและบันทึกแล้ว", "current_angle": 90, "servo_id": servo_id})
     except Exception as e:
         return jsonify({"status": "error", "message": f"ไม่สามารถตั้งค่า Servo ได้: {str(e)}"}), 400
 
@@ -285,10 +327,11 @@ def move():
             current_angle = max(0, current_angle - step)
         elif direction == 'right' or direction == 'up':
             current_angle = min(180, current_angle + step)
+        elif direction == 'home':
+            current_angle = 90
 
         servos_config[servo_id]["angle"] = current_angle
         
-        # สั่งงานฮาร์ดแวร์ตามประเภทการเชื่อมต่อ
         if conn_type == 'pca9685':
             pca_kit.servo[pin].angle = current_angle
         elif conn_type == 'gpio':
@@ -297,13 +340,7 @@ def move():
             time.sleep(0.15)
             target_servo.detach() 
             
-        return jsonify({
-            "status": "ok", 
-            "angle": current_angle, 
-            "pin": pin,
-            "type": conn_type,
-            "servo_id": servo_id
-        })
+        return jsonify({"status": "ok", "angle": current_angle, "pin": pin, "type": conn_type, "servo_id": servo_id})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 400
 
@@ -314,36 +351,45 @@ def get_servos_status():
         "servo1_connected": servos_config["1"]["connected"],
         "servo1_angle": servos_config["1"]["angle"],
         "servo1_type": servos_config["1"]["type"],
+        "servo1_pin": servos_config["1"]["pin"],
         
         "servo2_connected": servos_config["2"]["connected"],
         "servo2_angle": servos_config["2"]["angle"],
-        "servo2_type": servos_config["2"]["type"]
+        "servo2_type": servos_config["2"]["type"],
+        "servo2_pin": servos_config["2"]["pin"]
     })
 
 # ==========================================
 # FLASK ROUTES
 # ==========================================
-
 @app.route('/')
 def index():
     local_ip = get_local_ip()
     subnet = '.'.join(local_ip.split('.')[:-1]) + '.'
     return render_template('index.html', local_ip=local_ip, subnet=subnet)
 
+@app.route('/live')
+def index_live(): return render_template('live.html')
+
 @app.route('/camera')
-def index_camera():
-    return render_template('camera.html')
+def index_camera(): return render_template('camera.html')
+
+@app.route('/servo')
+def index_servo(): return render_template('servo.html')
+
+@app.route('/control')
+def index_control(): 
+    """หน้ารวม Master Control (กล้อง Pi + บังคับมอเตอร์)"""
+    return render_template('control.html')
 
 @app.route('/scan_network', methods=['POST'])
 def scan_network():
     data = request.json
     subnet = data.get('subnet')
     if not subnet.endswith('.'): subnet += '.'
-
     with ThreadPoolExecutor(max_workers=100) as executor:
         ips = [f"{subnet}{i}" for i in range(1, 255)]
         results = list(filter(None, executor.map(quick_scan_host, ips)))
-    
     results.sort(key=lambda x: int(x['ip'].split('.')[-1]))
     return jsonify({'results': results})
 
@@ -351,20 +397,13 @@ def scan_network():
 def deep_scan():
     target_ip = request.json.get('ip')
     open_ports = []
-    max_port = 65535
-    
     with ThreadPoolExecutor(max_workers=200) as executor:
-        futures = {executor.submit(check_port, target_ip, p, 0.05): p for p in range(1, max_port + 1)}
+        futures = {executor.submit(check_port, target_ip, p, 0.05): p for p in range(1, 65536)}
         from concurrent.futures import as_completed
         for future in as_completed(futures):
             res = future.result()
             if res: open_ports.append(res)
-            
     return jsonify({'ip': target_ip, 'open_ports': sorted(open_ports)})
-
-@app.route('/servo')
-def index_servo():
-    return render_template('servo.html')
 
 def cleanup():
     global servos_config
@@ -379,6 +418,8 @@ def cleanup():
 
 if __name__ == '__main__':
     try:
+        # โหลดค่าคอนฟิก Servo ที่เคยบันทึกไว้ขึ้นมาเชื่อมต่อฮาร์ดแวร์ทันที
+        load_servo_config()
         app.run(host='0.0.0.0', port=8000, debug=False, threaded=True)
     except KeyboardInterrupt:
         cleanup()
