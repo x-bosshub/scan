@@ -4,3 +4,4 @@ opencv-python==4.8.1.78
 gpiozero==2.0
 lgpio==0.2.2.0
 psutil==5.9.6
+adafruit-circuitpython-servokit==1.3.12
