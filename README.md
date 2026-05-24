@@ -32,3 +32,13 @@ chmod +x install.sh setup_service.sh
 ```
 ./setup_service.sh
 ```
+
+
+
+# ​ซ่อมแซมระบบ APT ที่พัง (Clear Cache)
+​รันคำสั่ง 3 บรรทัดนี้ใน Terminal ทีละบรรทัด เพื่อล้างไฟล์ที่พังและดาวน์โหลดรายชื่อใหม่:
+```
+sudo rm -rf /var/lib/apt/lists/*
+sudo apt clean
+sudo apt update
+```
