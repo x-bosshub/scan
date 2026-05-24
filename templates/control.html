@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="th" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Master Control Room</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body { background-color: #000; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow-x: hidden; }
+        .navbar { background-color: #1a1d20; border-bottom: 2px solid #0dcaf0; }
+        .control-panel { background-color: #111417; border-left: 2px solid #333; height: calc(100vh - 70px); overflow-y: auto; }
+        
+        .video-container {
+            width: 100%; height: calc(100vh - 70px); 
+            display: flex; justify-content: center; align-items: center;
+            background-color: #000; position: relative;
+        }
+        .video-container img { width: 100%; height: 100%; object-fit: contain; }
+
+        .ptz-btn { height: 70px; font-size: 1.5rem; }
+        .angle-badge { font-family: monospace; font-size: 1.1rem; }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar navbar-expand-lg navbar-dark p-3 shadow">
+        <div class="container-fluid px-4">
+            <a class="navbar-brand text-info fw-bold" href="#"><i class="fa-solid fa-gamepad"></i> MASTER CONTROL ROOM</a>
+            <div class="d-flex align-items-center">
+                <a href="/" class="btn btn-outline-light btn-sm fw-bold"><i class="fa-solid fa-house"></i> Exit</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid p-0">
+        <div class="row g-0">
+            
+            <div class="col-lg-8 col-xl-9">
+                <div class="video-container">
+                    <img id="stream-img" src="/video_pi" alt="ไม่มีสัญญาณกล้อง (Pi Camera)">
+                    <div class="position-absolute top-0 start-0 m-3 p-2 bg-dark rounded text-info fw-bold" style="opacity: 0.7;">
+                        <i class="fa-solid fa-circle text-danger blink"></i> LIVE: Pi Camera
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4 col-xl-3 control-panel p-4 shadow-lg">
+                <h4 class="fw-bold mb-4 border-bottom border-secondary pb-2 text-warning">
+                    <i class="fa-solid fa-robot"></i> KIOSK CONTROLS
+                </h4>
+
+                <div class="mb-4 bg-dark rounded p-3 border border-secondary shadow-sm">
+                    <div class="d-flex justify-content-between mb-3 align-items-center">
+                        <span class="fw-bold text-light"><i class="fa-solid fa-arrows-left-right text-info"></i> แกน X (ซ้าย-ขวา)</span>
+                        <span id="angle-txt-1" class="badge bg-secondary angle-badge">OFFLINE</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="fw-bold text-light"><i class="fa-solid fa-arrows-up-down text-success"></i> แกน Y (ขึ้น-ลง)</span>
+                        <span id="angle-txt-2" class="badge bg-secondary angle-badge">OFFLINE</span>
+                    </div>
+                    <div class="text-center mt-3">
+                        <small id="save-status" class="text-muted"><i class="fa-solid fa-save"></i> โหลดการตั้งค่าฮาร์ดแวร์อัตโนมัติ</small>
+                    </div>
+                </div>
+
+                <div class="text-center mb-4">
+                    <div class="row g-2 mb-2 justify-content-center">
+                        <div class="col-4"><button onclick="movePTZ('2', 'up')" id="ctrl-up" class="btn btn-outline-warning w-100 ptz-btn shadow" disabled><i class="fa-solid fa-chevron-up"></i></button></div>
+                    </div>
+                    <div class="row g-2 mb-2 justify-content-center">
+                        <div class="col-4"><button onclick="movePTZ('1', 'left')" id="ctrl-left" class="btn btn-outline-warning w-100 ptz-btn shadow" disabled><i class="fa-solid fa-chevron-left"></i></button></div>
+                        <div class="col-4"><button onclick="movePTZ('1', 'home')" id="ctrl-home" class="btn btn-warning w-100 ptz-btn shadow fw-bold text-dark" style="font-size: 1rem;" disabled>HOME</button></div>
+                        <div class="col-4"><button onclick="movePTZ('1', 'right')" id="ctrl-right" class="btn btn-outline-warning w-100 ptz-btn shadow" disabled><i class="fa-solid fa-chevron-right"></i></button></div>
+                    </div>
+                    <div class="row g-2 justify-content-center">
+                        <div class="col-4"><button onclick="movePTZ('2', 'down')" id="ctrl-down" class="btn btn-outline-warning w-100 ptz-btn shadow" disabled><i class="fa-solid fa-chevron-down"></i></button></div>
+                    </div>
+                </div>
+
+                <div id="ptz-alert-status" class="alert alert-danger text-center fw-bold p-2 small shadow-sm">
+                    มอเตอร์ยังไม่ถูกบันทึกค่า (กรุณาไปที่เมนู Servo Setup)
+                </div>
+
+                <a href="/servo" target="_blank" class="btn btn-outline-secondary w-100 mt-2"><i class="fa-solid fa-cog"></i> ปรับแต่งขา GPIO / PCA9685</a>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function updateServosStatus() {
+            try {
+                const response = await fetch('/api/get_servos_status');
+                const data = await response.json();
+                
+                if (data.servo1_connected) {
+                    document.getElementById('angle-txt-1').innerText = data.servo1_angle + '°';
+                    document.getElementById('angle-txt-1').className = 'badge bg-info text-dark angle-badge';
+                    document.getElementById('ctrl-left').disabled = false;
+                    document.getElementById('ctrl-right').disabled = false;
+                    document.getElementById('ctrl-home').disabled = false;
+                }
+
+                if (data.servo2_connected) {
+                    document.getElementById('angle-txt-2').innerText = data.servo2_angle + '°';
+                    document.getElementById('angle-txt-2').className = 'badge bg-success text-dark angle-badge';
+                    document.getElementById('ctrl-up').disabled = false;
+                    document.getElementById('ctrl-down').disabled = false;
+                    document.getElementById('ctrl-home').disabled = false;
+                }
+
+                if (data.servo1_connected || data.servo2_connected) {
+                    const alertBox = document.getElementById('ptz-alert-status');
+                    alertBox.className = 'alert alert-success text-center fw-bold p-2 small shadow-sm';
+                    alertBox.innerHTML = '<i class="fa-solid fa-circle-check"></i> มอเตอร์พร้อมใช้งาน';
+                    document.getElementById('save-status').innerHTML = `<i class="fa-solid fa-check text-success"></i> ระบบดึงค่า Save มาใช้งานแล้ว`;
+                }
+            } catch (error) {
+                console.log("Error status connection failed");
+            }
+        }
+
+        async function movePTZ(servoId, direction) {
+            try {
+                const response = await fetch('/move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ servo_id: servoId, direction: direction })
+                });
+                const data = await response.json();
+                if (data.status === "ok") {
+                    document.getElementById(`angle-txt-${servoId}`).innerText = data.angle + '°';
+                    if (direction === 'home') {
+                        // ถ้ากด Home ให้สั่งให้แกน Y กลับไป 90 ด้วย
+                        fetch('/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ servo_id: '2', direction: 'home' }) }).then(() => updateServosStatus());
+                    }
+                }
+            } catch (e) {
+                console.log("Failed to send PTZ command");
+            }
+        }
+
+        // เช็คสถานะมอเตอร์ซ้ำทุกๆ 5 วินาที เผื่อมีการไปปรับตั้งค่าในหน้าต่างอื่น
+        updateServosStatus();
+        setInterval(updateServosStatus, 5000);
+    </script>
+</body>
+</html>
