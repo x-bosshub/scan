@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lives</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #f0f2f5; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .card { border-radius: 12px; border: none; box-shadow: 0 5px 15px rgba(0,0,0,0.05); }
+        
+        /* Badges Styling */
+        .type-badge { font-size: 0.85em; padding: 6px 10px; border-radius: 20px; font-weight: 500; }
+        .bg-camera { background-color: #e3f2fd; color: #0d47a1; border: 1px solid #bbdefb; }
+        .bg-iot { background-color: #e8f5e9; color: #1b5e20; border: 1px solid #c8e6c9; }
+        .bg-server { background-color: #f3e5f5; color: #4a148c; border: 1px solid #e1bee7; }
+        
+        /* Buttons */
+        .btn-live { background: #ff4757; color: white; border: none; font-size: 0.85rem; }
+        .btn-live:hover { background: #ff6b81; color: white; }
+        .btn-deep { background: #2f3542; color: white; border: none; font-size: 0.85rem; }
+        .btn-deep:hover { background: #57606f; color: white; }
+        
+        /* Video Stream Box */
+        .stream-box { 
+            background: #000; 
+            width: 100%; 
+            min-height: 400px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            border-radius: 8px; 
+            overflow: hidden; 
+            position: relative;
+        }
+        .stream-box img { width: 100%; height: auto; object-fit: contain; max-height: 500px; }
+    </style>
+</head>
+<body> 
+<div class="modal fade" id="liveModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title"><i class="fas fa-video text-danger me-2"></i>Live Monitor</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" onclick="stopStream()"></button>
+            </div>
+            <div class="modal-body bg-secondary">
+                
+                <div class="row g-2 mb-2 p-2 bg-dark rounded mx-0">
+                    <div class="col-md-3">
+                        <input type="text" id="ipAddr" class="form-control form-control-sm bg-secondary text-white border-0" value="192.168.1." placeholder="IP Address">
+                    </div>
+
+                    <div class="col-md-3">
+                        <input type="text" id="portCam" class="form-control form-control-sm bg-secondary text-white border-0" placeholder="554" value="554">
+                    </div>
+
+                    <div class="col-md-3">
+                        <input type="text" id="camUser" class="form-control form-control-sm bg-secondary text-white border-0" value="admin" placeholder="Username (admin)">
+                    </div>
+                    <div class="col-md-3">
+                        <input type="password" id="camPwd" class="form-control form-control-sm bg-secondary text-white border-0" placeholder="Password">
+                    </div>
+                    <div class="col-md-4">
+                        <select id="camPath" class="form-select form-select-sm bg-secondary text-white border-0">
+                            <option value="onvif1">ONVIF (onvif1)</option>
+                            <option value="stream1">Standard (stream1)</option>
+                            <option value="live">Generic (live)</option>
+                            <option value="cam/realmonitor?channel=1&subtype=0">Dahua (Main)</option>
+                            <option value="cam/realmonitor?channel=1&subtype=1">Dahua (Sub)</option>
+                            <option value="Streaming/Channels/101">Hikvision (Main)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button onclick="refreshStream()" class="btn btn-warning btn-sm w-100 fw-bold">Reload</button>
+                    </div>
+                </div>
+
+                <div class="stream-box">
+                    <div id="streamLoader" class="spinner-border text-light position-absolute" style="display:none;"></div>
+                    <img id="videoStream" src="" alt="NO SIGNAL" onerror="this.style.display='none';">
+                    <div id="streamError" class="text-white position-absolute" style="display:none;">Connection Failed / Auth Required</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="deepScanModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="fas fa-search-plus me-2"></i>Deep Scan (1-65535)</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center p-4">
+                <h4 id="deepIpDisplay" class="mb-3 fw-bold text-dark"></h4>
+                
+                <div id="deepLoading">
+                    <div class="spinner-grow text-primary" role="status"></div>
+                    <div class="spinner-grow text-primary" role="status"></div>
+                    <div class="spinner-grow text-primary" role="status"></div>
+                    <p class="mt-3 text-muted">Scanning all 65,535 ports...<br><small>(This takes about 15-30 seconds)</small></p>
+                </div>
+
+                <div id="deepResult" style="display:none;">
+                    <h6 class="text-start mb-2 text-muted">Open Ports Found:</h6>
+                    <div id="portList" class="d-flex flex-wrap gap-2 justify-content-center p-3 bg-light rounded border">
+                        </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const urlParams = new URLSearchParams(window.location.search);
+
+    // Initialize Modals
+    const liveModal = new bootstrap.Modal(document.getElementById('liveModal'));
+    const deepScanModal = new bootstrap.Modal(document.getElementById('deepScanModal'));
+    let currentIp = '';
+
+    // ================= LIVE STREAM LOGIC =================
+    function openLive(ip) {
+        currentIp = ip;
+        // Reset defaults
+        document.getElementById('camUser').value = 'admin';
+        document.getElementById('camPwd').value = '';
+        document.getElementById('streamError').style.display = 'none';
+        liveModal.show();
+        setTimeout(refreshStream, 500); // Delay slightly to let modal open
+    }
+
+// ================= LIVE STREAM LOGIC (Improved) =================
+function refreshStream() {
+    const portCam = document.getElementById('portCam').value;
+    const currentIp = document.getElementById('ipAddr').value;
+    const user = document.getElementById('camUser').value;
+    const pwd = document.getElementById('camPwd').value;
+    const path = document.getElementById('camPath').value;
+    const img = document.getElementById('videoStream');
+    const loader = document.getElementById('streamLoader');
+    const errorMsg = document.getElementById('streamError');
+
+    // Reset UI ก่อนเริ่มโหลดใหม่
+    img.style.display = 'none';
+    loader.style.display = 'block';
+    errorMsg.style.display = 'none';
+
+    // สร้าง URL โดยใช้ encodeURIComponent เพื่อป้องกันตัวอักษรพิเศษใน Password (@, #, $)
+    const streamUrl = `/video_feed?ip=${currentIp}&port=${portCam}&user=${encodeURIComponent(user)}&pwd=${encodeURIComponent(pwd)}&path=${encodeURIComponent(path)}&t=${Date.now()}`;
+    
+    // ตั้งเวลา Timeout: ถ้า 10 วินาทียังโหลดภาพไม่ได้ ให้แจ้ง Error
+    const timeout = setTimeout(() => {
+        if (img.style.display === 'none') {
+            loader.style.display = 'none';
+            errorMsg.innerText = "Request Timeout: Camera not responding";
+            errorMsg.style.display = 'block';
+            img.src = ""; // หยุดความพยายามโหลด
+        }
+    }, 10000);
+
+    img.src = streamUrl;
+
+    img.onload = function() {
+        clearTimeout(timeout);
+        loader.style.display = 'none';
+        img.style.display = 'block';
+    };
+
+    img.onerror = function() {
+        clearTimeout(timeout);
+        loader.style.display = 'none';
+        errorMsg.innerText = "Connection Failed / Auth Error";
+        errorMsg.style.display = 'block';
+    };
+}
+
+    function stopStream() {
+        document.getElementById('videoStream').src = "";
+        window.location.href="/";
+    }
+
+if(urlParams.get('ip')) document.getElementById('ipAddr').value = urlParams.get('ip');
+if(urlParams.get('port')) document.getElementById('portCam').value = urlParams.get('port');
+if(urlParams.get('user')) document.getElementById('camUser').value = urlParams.get('user');
+if(urlParams.get('pass')) document.getElementById('camPwd').value = urlParams.get('pass');
+
+
+liveModal.show();
+
+
+</script>
+</body>
+</html>
