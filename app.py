@@ -14,27 +14,36 @@ from time import sleep
 
 factory = LGPIOFactory()
 
+# ระบบตรวจจับบอร์ด Servo 16 ช่อง (PCA9685)
+try:
+    from adafruit_servokit import ServoKit
+    pca_kit = ServoKit(channels=16)
+    pca_available = True
+    print("[SYSTEM] ตรวจพบบอร์ด PCA9685 16-Channel Servo")
+except Exception as e:
+    pca_kit = None
+    pca_available = False
+    print(f"[WARNING] ไม่พบบอร์ด PCA9685 หรือยังไม่ได้เปิด I2C: {e}")
+
 app = Flask(__name__) 
 
-# ตัวแปร Global สำหรับจัดการ Servo 2 ตัว (1=ซ้ายขวา, 2=ขึ้นลง)
+# ตัวแปร Global จัดการ Servo (รองรับ 2 ชนิด: 'gpio' และ 'pca9685')
 servos_config = {
-    "1": {"obj": None, "pin": None, "angle": 90, "name": "ซ้าย - ขวา (Pan)"},
-    "2": {"obj": None, "pin": None, "angle": 90, "name": "ขึ้น - ลง (Tilt)"}
+    "1": {"connected": False, "type": "gpio", "obj": None, "pin": None, "angle": 90, "name": "ซ้าย-ขวา"},
+    "2": {"connected": False, "type": "gpio", "obj": None, "pin": None, "angle": 90, "name": "ขึ้น-ลง"}
 }
 
-# 1. Quick Scan Ports: รายการพอร์ตสำหรับสแกนเร็วเพื่อระบุประเภทอุปกรณ์
 COMMON_PORTS = [
     21, 22, 23,43, 53, 80, 81, 111, 443,
     554, 1935,
     1883, 8883,
-    3306, 5432, 27017,                        # Database (MySQL, Postgres, Mongo)
-    3000, 4000, 5000, 6080, 7681, 7000,       # Web Apps / Dev
-    8000, 8008, 8009, 8080, 8081, 8090, 8092, # Web Alternatives
-    8200, 8443, 8899, 9000, 9080,             # Admin / Docker / Portainer
-    34567, 37777, 37778,37779           # CCTV Specific (XMeye, Dahua)
+    3306, 5432, 27017,
+    3000, 4000, 5000, 6080, 7681, 7000,
+    8000, 8008, 8009, 8080, 8081, 8090, 8092,
+    8200, 8443, 8899, 9000, 9080,
+    34567, 37777, 37778,37779
 ]
 
-# 2. Vendor Database: จับคู่ MAC Address กับผู้ผลิต
 MAC_VENDORS = {
     "DC:A6:32": "Raspberry Pi", "B8:27:EB": "Raspberry Pi", "E4:5F:01": "Raspberry Pi", "28:CD:C1": "Raspberry Pi",
     "D8:3A:DD": "Espressif", "24:0A:C4": "Espressif", "30:AE:A4": "Espressif", "AC:67:B2": "Espressif", "60:01:94": "Espressif",
@@ -49,7 +58,6 @@ MAC_VENDORS = {
 # ==========================================
 
 def get_local_ip():
-    """หา IP ของเครื่องที่รันโปรแกรม"""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(('8.8.8.8', 80))
@@ -61,7 +69,6 @@ def get_local_ip():
     return IP
 
 def get_mac_address(ip):
-    """อ่าน MAC Address จาก ARP Cache ของ Linux/Pi"""
     try:
         with open('/proc/net/arp', 'r') as f:
             data = f.read()
@@ -73,15 +80,12 @@ def get_mac_address(ip):
     return None
 
 def resolve_vendor(mac):
-    """แปลง MAC OUI เป็นชื่อผู้ผลิต"""
     if not mac: return ""
     for oui, vendor in MAC_VENDORS.items():
         if mac.startswith(oui): return vendor
     return ""
 
 def identify_device_type(ports, vendor):
-    """สมองกล: วิเคราะห์ประเภทอุปกรณ์จาก Port และ Vendor"""
-    
     if 37777 in ports: return "Dahua Device", "fa-video", "bg-camera"
     if 34567 in ports: return "XMeye/China DVR", "fa-video", "bg-camera"
     if 8200 in ports: return "Hikvision Device", "fa-video", "bg-camera"
@@ -103,7 +107,6 @@ def identify_device_type(ports, vendor):
     return "Network Device", "fa-network-wired", "bg-light text-dark"
 
 def check_port(ip, port, timeout=0.0):
-    """ตรวจสอบสถานะพอร์ต (Open/Closed)"""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(timeout)
     try:
@@ -115,10 +118,8 @@ def check_port(ip, port, timeout=0.0):
         return None
 
 def quick_scan_host(ip):
-    """สแกน 1 เครื่องแบบรวดเร็ว (Quick Scan)"""
     active_ports = []
     is_up = False
-    
     scan_timeout = 0.05
     
     for port in COMMON_PORTS:
@@ -148,7 +149,6 @@ def quick_scan_host(ip):
 # ==========================================
 
 def generate_frames(rtsp_url):
-    """ดึงภาพจาก RTSP พร้อมการตั้งค่า FFMPEG เพื่อความเสถียรสูงสุด"""
     import os
     os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;udp|timeout;5000000"
 
@@ -167,15 +167,12 @@ def generate_frames(rtsp_url):
                 continue
 
             frame = cv2.resize(frame, (800, 450)) 
-
             ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
             if not ret:
                 continue
                 
             frame_bytes = buffer.tobytes()
-            
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
                    
     except Exception as e:
         print(f"[SYSTEM] Stream error: {e}")
@@ -184,7 +181,6 @@ def generate_frames(rtsp_url):
 
 @app.route('/video_feed')
 def video_feed():
-    """Route สำหรับดึงภาพสดไปแสดงบนหน้าเว็บ"""
     ip = request.args.get('ip')
     user = request.args.get('user', 'admin') 
     pwd = request.args.get('pwd')
@@ -197,11 +193,7 @@ def video_feed():
         rtsp_url = f"rtsp://{ip}:{port}/{path}"
         
     print(f"[LOG] เริ่มการสตรีมจาก: {rtsp_url}")
-    
-    return Response(
-        generate_frames(rtsp_url),
-        mimetype='multipart/x-mixed-replace; boundary=frame'
-    )
+    return Response(generate_frames(rtsp_url), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 # ==========================================
 # SYSTEM STATUS & HARDWARE LOGIC
@@ -209,7 +201,6 @@ def video_feed():
 
 @app.route('/api/system_stats')
 def system_stats():
-    """API ดึงข้อมูลสถานะเครื่อง (CPU, RAM, Temp)"""
     cpu_usage = psutil.cpu_percent(interval=0.1)
     ram_info = psutil.virtual_memory()
     disk_info = psutil.disk_usage('/')
@@ -232,35 +223,50 @@ def system_stats():
 
 @app.route('/api/setup_servo', methods=['POST'])
 def setup_servo():
-    """API ตั้งค่าหมายเลข GPIO ขาของ Servo"""
     global servos_config
     try:
         data = request.get_json()
         servo_id = str(data.get('servo_id', '1'))
+        conn_type = data.get('type', 'gpio') # 'gpio' หรือ 'pca9685'
         pin = int(data.get('pin'))
         
         if servo_id not in servos_config:
             return jsonify({"status": "error", "message": "ไม่พบ Servo ID ในระบบ"}), 400
             
-        if servos_config[servo_id]["obj"] is not None:
+        # เคลียร์การเชื่อมต่อเก่าทิ้ง
+        if servos_config[servo_id]["type"] == "gpio" and servos_config[servo_id]["obj"] is not None:
             servos_config[servo_id]["obj"].close()
-            
-        servos_config[servo_id]["obj"] = AngularServo(pin, min_angle=0, max_angle=180, pin_factory=factory)
+            servos_config[servo_id]["obj"] = None
+
+        servos_config[servo_id]["type"] = conn_type
         servos_config[servo_id]["pin"] = pin
-        servos_config[servo_id]["angle"] = 90 
+        servos_config[servo_id]["angle"] = 90
         
+        if conn_type == "pca9685":
+            if not pca_available:
+                return jsonify({"status": "error", "message": "บอร์ด PCA9685 ไม่พร้อมทำงาน หรือยังไม่ได้เปิด I2C"}), 400
+            if pin < 0 or pin > 15:
+                return jsonify({"status": "error", "message": "หมายเลขช่อง PCA9685 ต้องอยู่ระหว่าง 0 - 15"}), 400
+            
+            pca_kit.servo[pin].angle = 90 # ตั้งค่าเริ่มต้น
+            servos_config[servo_id]["connected"] = True
+            
+        elif conn_type == "gpio":
+            servos_config[servo_id]["obj"] = AngularServo(pin, min_angle=0, max_angle=180, pin_factory=factory)
+            servos_config[servo_id]["obj"].angle = 90
+            servos_config[servo_id]["connected"] = True
+
         return jsonify({
             "status": "ok", 
-            "message": "ตั้งค่าสำเร็จ", 
-            "current_angle": servos_config[servo_id]["angle"],
+            "message": f"ตั้งค่าแบบ {conn_type.upper()} สำเร็จ", 
+            "current_angle": 90,
             "servo_id": servo_id
         })
     except Exception as e:
-        return jsonify({"status": "error", "message": f"ไม่สามารถตั้งค่า GPIO ได้: {str(e)}"}), 400
+        return jsonify({"status": "error", "message": f"ไม่สามารถตั้งค่า Servo ได้: {str(e)}"}), 400
 
 @app.route('/move', methods=['POST'])
 def move():
-    """API ควบคุม Servo ตาม ID ที่ระบุ"""
     global servos_config
     try:
         data = request.get_json()
@@ -268,28 +274,34 @@ def move():
         direction = data.get('direction')
         step = 5 
 
-        if servo_id not in servos_config or servos_config[servo_id]["obj"] is None:
-            return jsonify({"status": "error", "message": f"ไม่ได้ต่อสาย Servo {servo_id}"}), 400
+        if servo_id not in servos_config or not servos_config[servo_id]["connected"]:
+            return jsonify({"status": "error", "message": f"ไม่ได้เชื่อมต่อ Servo {servo_id}"}), 400
             
         current_angle = servos_config[servo_id]["angle"]
-        target_servo = servos_config[servo_id]["obj"]
+        conn_type = servos_config[servo_id]["type"]
+        pin = servos_config[servo_id]["pin"]
 
-        # รองรับซ้ายขวา (ID 1) และขึ้นลง (ID 2)
         if direction == 'left' or direction == 'down':
             current_angle = max(0, current_angle - step)
         elif direction == 'right' or direction == 'up':
             current_angle = min(180, current_angle + step)
 
         servos_config[servo_id]["angle"] = current_angle
-        target_servo.angle = current_angle
         
-        time.sleep(0.15)
-        target_servo.detach() 
-        
+        # สั่งงานฮาร์ดแวร์ตามประเภทการเชื่อมต่อ
+        if conn_type == 'pca9685':
+            pca_kit.servo[pin].angle = current_angle
+        elif conn_type == 'gpio':
+            target_servo = servos_config[servo_id]["obj"]
+            target_servo.angle = current_angle
+            time.sleep(0.15)
+            target_servo.detach() 
+            
         return jsonify({
             "status": "ok", 
             "angle": current_angle, 
-            "pin": servos_config[servo_id]["pin"],
+            "pin": pin,
+            "type": conn_type,
             "servo_id": servo_id
         })
     except Exception as e:
@@ -297,13 +309,15 @@ def move():
 
 @app.route('/api/get_servos_status')
 def get_servos_status():
-    """API ดึงสถานะปัจจุบันของเซอร์โวทั้ง 2 ตัวไปเช็คที่หน้ากล้อง"""
     global servos_config
     return jsonify({
-        "servo1_connected": servos_config["1"]["obj"] is not None,
+        "servo1_connected": servos_config["1"]["connected"],
         "servo1_angle": servos_config["1"]["angle"],
-        "servo2_connected": servos_config["2"]["obj"] is not None,
-        "servo2_angle": servos_config["2"]["angle"]
+        "servo1_type": servos_config["1"]["type"],
+        
+        "servo2_connected": servos_config["2"]["connected"],
+        "servo2_angle": servos_config["2"]["angle"],
+        "servo2_type": servos_config["2"]["type"]
     })
 
 # ==========================================
@@ -318,19 +332,14 @@ def index():
 
 @app.route('/camera')
 def index_camera():
-    """เปลี่ยนจากหน้า /live เดิม เป็นหน้าควบคุม /camera แบบ PTZ อัตโนมัติ"""
     return render_template('camera.html')
 
 @app.route('/scan_network', methods=['POST'])
 def scan_network():
     data = request.json
     subnet = data.get('subnet')
-    
-    if not subnet.endswith('.'):
-        subnet += '.'
+    if not subnet.endswith('.'): subnet += '.'
 
-    print(f"Scanning subnet: {subnet}1 - {subnet}254")
-    
     with ThreadPoolExecutor(max_workers=100) as executor:
         ips = [f"{subnet}{i}" for i in range(1, 255)]
         results = list(filter(None, executor.map(quick_scan_host, ips)))
@@ -341,35 +350,17 @@ def scan_network():
 @app.route('/deep_scan', methods=['POST'])
 def deep_scan():
     target_ip = request.json.get('ip')
-    print(f"Deep scanning target: {target_ip}")
-    
     open_ports = []
     max_port = 65535
     
     with ThreadPoolExecutor(max_workers=200) as executor:
         futures = {executor.submit(check_port, target_ip, p, 0.05): p for p in range(1, max_port + 1)}
-        
         from concurrent.futures import as_completed
         for future in as_completed(futures):
             res = future.result()
-            if res:
-                open_ports.append(res)
+            if res: open_ports.append(res)
             
     return jsonify({'ip': target_ip, 'open_ports': sorted(open_ports)})
-
-@app.route('/video_feedold')
-def video_feed_old():
-    ip = request.args.get('ip')
-    user = request.args.get('user', '')
-    pwd = request.args.get('pwd', '')
-    path = request.args.get('path', 'onvif1')
-    
-    if user and pwd:
-        rtsp_url = f"rtsp://{user}:{pwd}@{ip}:554/{path}"
-    else:
-        rtsp_url = f"rtsp://{ip}:554/{path}"
-        
-    return Response(generate_frames(rtsp_url), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/servo')
 def index_servo():
@@ -378,21 +369,18 @@ def index_servo():
 def cleanup():
     global servos_config
     for sid, sdata in servos_config.items():
-        if sdata["obj"] is not None:
+        if sdata["type"] == "gpio" and sdata["obj"] is not None:
             try:
                 sdata["obj"].angle = 0
                 sleep(0.2)
                 sdata["obj"].value = None
                 sdata["obj"].close()
-            except:
-                pass
+            except: pass
 
 if __name__ == '__main__':
     try:
         app.run(host='0.0.0.0', port=8000, debug=False, threaded=True)
     except KeyboardInterrupt:
         cleanup()
-        print("close")
     finally:
         cleanup()
-        print("close")
