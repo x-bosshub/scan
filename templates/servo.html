@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="th" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Servo Controller Setup</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .navbar { background-color: #1a1d20; border-bottom: 2px solid #ffc107; }
+        .card { background-color: #1e2125; border: 1px solid #333; }
+        
+        .angle-display {
+            font-size: 5rem;
+            font-weight: bold;
+            font-family: monospace;
+            color: #ffc107;
+            text-shadow: 0 0 10px rgba(255, 193, 7, 0.3);
+        }
+        
+        .control-btn {
+            height: 80px;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar navbar-expand-lg navbar-dark mb-4 p-3 shadow-sm">
+        <div class="container-fluid px-4">
+            <a class="navbar-brand text-warning fw-bold" href="#"><i class="fa-solid fa-robot"></i> SERVO MOTOR CONTROLLER</a>
+            <div class="d-flex align-items-center">
+                <a href="/" class="btn btn-outline-info btn-sm fw-bold"><i class="fa-solid fa-arrow-left"></i> Back to Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container" style="max-width: 800px;">
+        
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-dark border-bottom border-secondary p-3">
+                <h5 class="mb-0 text-white fw-bold"><i class="fa-solid fa-microchip text-warning"></i> 1. ตั้งค่าขา GPIO (Setup)</h5>
+            </div>
+            <div class="card-body p-4">
+                <div class="row align-items-end">
+                    <div class="col-md-8">
+                        <label class="form-label text-light fw-bold">ระบุหมายเลข GPIO (เช่น 12, 18, 19):</label>
+                        <input type="number" id="gpio-pin" class="form-control form-control-lg bg-dark text-warning border-secondary fw-bold" placeholder="ตัวอย่าง: 18" min="0" max="40">
+                    </div>
+                    <div class="col-md-4 mt-3 mt-md-0">
+                        <button onclick="setupServo()" id="setup-btn" class="btn btn-warning btn-lg w-100 fw-bold shadow">
+                            <i class="fa-solid fa-plug"></i> APPLY SETUP
+                        </button>
+                    </div>
+                </div>
+                <div id="setup-status" class="mt-3 fw-bold text-center"></div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-header bg-dark border-bottom border-secondary p-3">
+                <h5 class="mb-0 text-white fw-bold"><i class="fa-solid fa-gamepad text-info"></i> 2. แผงควบคุม (Control Panel)</h5>
+            </div>
+            <div class="card-body p-5 text-center">
+                
+                <h6 class="text-muted text-uppercase letter-spacing-1">Current Angle</h6>
+                <div class="angle-display mb-4" id="current-angle">--°</div>
+
+                <div class="row">
+                    <div class="col-6">
+                        <button onclick="moveServo('left')" id="btn-left" class="btn btn-outline-info w-100 control-btn shadow-sm" disabled>
+                            <i class="fa-solid fa-angles-left"></i> LEFT (-5°)
+                        </button>
+                    </div>
+                    <div class="col-6">
+                        <button onclick="moveServo('right')" id="btn-right" class="btn btn-outline-info w-100 control-btn shadow-sm" disabled>
+                            RIGHT (+5°) <i class="fa-solid fa-angles-right"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="move-status" class="mt-4 fw-bold text-danger">กรุณาตั้งค่าขา GPIO ก่อนใช้งาน</div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // 1. ฟังก์ชันส่งค่า GPIO ไปให้ Python ตั้งค่า
+        async function setupServo() {
+            const pin = document.getElementById('gpio-pin').value;
+            const statusDiv = document.getElementById('setup-status');
+            const setupBtn = document.getElementById('setup-btn');
+
+            if (!pin) {
+                statusDiv.innerHTML = `<span class="text-danger"><i class="fa-solid fa-triangle-exclamation"></i> กรุณาระบุหมายเลข GPIO</span>`;
+                return;
+            }
+
+            setupBtn.disabled = true;
+            setupBtn.innerHTML = `<span class="spinner-border spinner-border-sm"></span> Loading...`;
+
+            try {
+                const response = await fetch('/api/setup_servo', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pin: parseInt(pin) })
+                });
+                
+                const data = await response.json();
+                
+                if(data.status === "ok") {
+                    statusDiv.innerHTML = `<span class="text-success"><i class="fa-solid fa-circle-check"></i> ${data.message}</span>`;
+                    document.getElementById('current-angle').innerText = data.current_angle + '°';
+                    
+                    // ปลดล็อกปุ่ม Control
+                    document.getElementById('btn-left').disabled = false;
+                    document.getElementById('btn-right').disabled = false;
+                    document.getElementById('move-status').innerHTML = `<span class="text-success"><i class="fa-solid fa-check"></i> ระบบพร้อมทำงาน</span>`;
+                } else {
+                    statusDiv.innerHTML = `<span class="text-danger"><i class="fa-solid fa-xmark"></i> ${data.message}</span>`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<span class="text-danger"><i class="fa-solid fa-wifi"></i> การเชื่อมต่อล้มเหลว</span>`;
+            } finally {
+                setupBtn.disabled = false;
+                setupBtn.innerHTML = `<i class="fa-solid fa-plug"></i> APPLY SETUP`;
+            }
+        }
+
+        // 2. ฟังก์ชันสั่งหมุน Servo ซ้าย-ขวา
+        async function moveServo(direction) {
+            const statusDiv = document.getElementById('move-status');
+
+            try {
+                const response = await fetch('/move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ direction: direction })
+                });
+                
+                const data = await response.json();
+                
+                if(data.status === "ok") {
+                    // อัปเดตตัวเลขแสดงผลบนจอ
+                    document.getElementById('current-angle').innerText = data.angle + '°';
+                    statusDiv.innerHTML = `<span class="text-success">สั่งหมุนสำเร็จ - กำลังอยู่ที่ ${data.angle} องศา (ขา GPIO ${data.pin})</span>`;
+                } else {
+                    statusDiv.innerHTML = `<span class="text-danger"><i class="fa-solid fa-xmark"></i> ${data.message}</span>`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<span class="text-danger"><i class="fa-solid fa-wifi"></i> ส่งคำสั่งไม่สำเร็จ</span>`;
+            }
+        }
+    </script>
+</body>
+</html>
