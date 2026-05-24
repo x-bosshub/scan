@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 import time
 import sys
+import psutil
+import os
 from gpiozero import AngularServo
 from gpiozero.pins.lgpio import LGPIOFactory
 from time import sleep
@@ -13,6 +15,11 @@ from time import sleep
 factory = LGPIOFactory()
 
 app = Flask(__name__) 
+
+# ตัวแปร Global สำหรับ Servo
+servo = None
+servo_pin = None
+state = {"angle": 90}
 
 # 1. Quick Scan Ports: รายการพอร์ตสำหรับสแกนเร็วเพื่อระบุประเภทอุปกรณ์
 COMMON_PORTS = [
@@ -117,21 +124,15 @@ def quick_scan_host(ip):
     active_ports = []
     is_up = False
     
-    # 1. Ping Check (Optional but Recommended for speed)
-    # ถ้าไม่อยากใช้ Ping (เพราะต้อง run sudo) ให้ใช้วิธีเช็ค port เร็วๆ แทน
-    # ปรับ timeout ให้สั้นมาก (0.05s) เพื่อให้ข้าม Dead IP ได้เร็ว
     scan_timeout = 0.05
     
-    # วนลูปเช็คพอร์ตสำคัญ
     for port in COMMON_PORTS:
         if check_port(ip, port, timeout=scan_timeout):
             active_ports.append(port)
             is_up = True
     
-    # ถ้าเจอ Port เปิดค่อยไปหาชื่อเครื่อง (ลดภาระการ Resolve Name)
     if is_up:
         try: 
-            # ลดเวลา lookup hostname
             hostname = socket.gethostbyaddr(ip)[0]
         except: 
             hostname = ""
@@ -146,22 +147,17 @@ def quick_scan_host(ip):
             'type': type_name, 'icon': icon, 'badge_class': badge_class
         }
     return None
+
 # ==========================================
 # PROFESSIONAL VIDEO STREAMING LOGIC
 # ==========================================
 
 def generate_frames(rtsp_url):
     """ดึงภาพจาก RTSP พร้อมการตั้งค่า FFMPEG เพื่อความเสถียรสูงสุด"""
-    
-    # กำหนดค่าให้ OpenCV ใช้ FFMPEG และลดความหน่วง (Latency)
-    # 5,000,000 คือ 5 วินาที สำหรับ timeout
     import os
     os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;udp|timeout;5000000"
 
-    # เปิดกล้องโดยระบุ API Preference เป็น FFMPEG
     camera = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-    
-    # ตั้งค่า Buffer ให้เหลือน้อยที่สุดเพื่อให้ภาพเป็น Real-time
     camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     if not camera.isOpened():
@@ -172,22 +168,17 @@ def generate_frames(rtsp_url):
         while True:
             success, frame = camera.read()
             if not success:
-                # กรณีภาพกระตุก ให้ลองอ่านซ้ำ หรือ Reconnect
                 time.sleep(0.1) 
                 continue
 
-            # ปรับขนาดภาพเล็กน้อยเพื่อประหยัด Bandwidth ของ Raspberry Pi
-            # (ช่วยให้ดูผ่านมือถือได้ลื่นขึ้น)
             frame = cv2.resize(frame, (800, 450)) 
 
-            # Encode เป็น JPG (คุณภาพ 70% กำลังดีสำหรับ Streaming)
             ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
             if not ret:
                 continue
                 
             frame_bytes = buffer.tobytes()
             
-            # ส่งข้อมูลแบบ Multipart Stream
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
                    
@@ -200,12 +191,11 @@ def generate_frames(rtsp_url):
 def video_feed():
     """Route สำหรับดึงภาพสดไปแสดงบนหน้าเว็บ"""
     ip = request.args.get('ip')
-    user = request.args.get('user', 'admin') # ค่าเริ่มต้นเป็น admin
+    user = request.args.get('user', 'admin') 
     pwd = request.args.get('pwd')
-    path = request.args.get('path', 'onvif1') # จากรูปของคุณคือ onvif1
+    path = request.args.get('path', 'onvif1') 
     port = request.args.get('port',554)
 
-    # สร้าง URL ตามรูปแบบที่คุณใช้ใน VLC (ภาพ 1000011587.png)
     if pwd:
         rtsp_url = f"rtsp://{user}:{pwd}@{ip}:{port}/{path}"
     else:
@@ -217,6 +207,55 @@ def video_feed():
         generate_frames(rtsp_url),
         mimetype='multipart/x-mixed-replace; boundary=frame'
     )
+
+# ==========================================
+# SYSTEM STATUS & HARDWARE LOGIC
+# ==========================================
+
+@app.route('/api/system_stats')
+def system_stats():
+    """API ดึงข้อมูลสถานะเครื่อง (CPU, RAM, Temp)"""
+    cpu_usage = psutil.cpu_percent(interval=0.1)
+    ram_info = psutil.virtual_memory()
+    disk_info = psutil.disk_usage('/')
+    
+    # อ่านค่าความร้อนจาก Raspberry Pi
+    try:
+        with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+            temp_c = float(f.read()) / 1000.0
+    except:
+        temp_c = 0.0 # กรณีไม่ได้รันบนบอร์ดที่รองรับเซ็นเซอร์นี้
+        
+    return jsonify({
+        "status": "ok",
+        "cpu_percent": cpu_usage,
+        "ram_percent": ram_info.percent,
+        "ram_used_mb": round(ram_info.used / (1024 * 1024), 2),
+        "ram_total_mb": round(ram_info.total / (1024 * 1024), 2),
+        "disk_percent": disk_info.percent,
+        "temperature_c": round(temp_c, 1)
+    })
+
+@app.route('/api/setup_servo', methods=['POST'])
+def setup_servo():
+    """API ตั้งค่าหมายเลข GPIO ขาของ Servo"""
+    global servo, servo_pin, state
+    try:
+        data = request.get_json()
+        pin = int(data.get('pin'))
+        
+        # ปิดการเชื่อมต่อขาเก่า (ถ้ามี)
+        if servo is not None:
+            servo.close()
+            
+        # สร้างออบเจ็กต์ Servo ใหม่ โดยกำหนดองศาเป็น 0 ถึง 180 ตามตรรกะเดิมของคุณ
+        servo = AngularServo(pin, min_angle=0, max_angle=180, pin_factory=factory)
+        servo_pin = pin
+        state["angle"] = 90 # เริ่มต้นที่กึ่งกลาง
+        
+        return jsonify({"status": "ok", "message": f"ตั้งค่า Servo ที่ขา GPIO {pin} สำเร็จ", "current_angle": state["angle"]})
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"ไม่สามารถตั้งค่า GPIO ได้: {str(e)}"}), 400
 
 # ==========================================
 # FLASK ROUTES
@@ -238,19 +277,15 @@ def scan_network():
     data = request.json
     subnet = data.get('subnet')
     
-    # ถ้า subnet ไม่มีจุดต่อท้าย ให้เติมจุด (ป้องกัน error)
     if not subnet.endswith('.'):
         subnet += '.'
 
     print(f"Scanning subnet: {subnet}1 - {subnet}254")
     
-    # เพิ่ม Workers เป็น 200 เพื่อความรวดเร็วสูงสุดใน LAN
     with ThreadPoolExecutor(max_workers=100) as executor:
         ips = [f"{subnet}{i}" for i in range(1, 255)]
-        # ใช้ map จะรอจนครบทุกตัว แต่ด้วย timeout 0.05s จะเสร็จในไม่กี่วินาที
         results = list(filter(None, executor.map(quick_scan_host, ips)))
     
-    # เรียงลำดับผลลัพธ์ตามเลข IP (แปลงเป็น int เพื่อให้เรียงถูกต้อง 1, 2, 10 ไม่ใช่ 1, 10, 2)
     results.sort(key=lambda x: int(x['ip'].split('.')[-1]))
     
     return jsonify({'results': results})
@@ -264,13 +299,9 @@ def deep_scan():
     open_ports = []
     max_port = 65535
     
-    # ใช้ workers สูงๆ สำหรับ Deep Scan
-    # และแบ่งช่วง Port (Chunking) ถ้าจำเป็น แต่ Python จัดการไหว
     with ThreadPoolExecutor(max_workers=200) as executor:
-        # ใช้ timeout 0.1 สำหรับ deep scan เพื่อความชัวร์
         futures = {executor.submit(check_port, target_ip, p, 0.05): p for p in range(1, max_port + 1)}
         
-        # ใช้ as_completed เพื่อไม่ต้องรอเรียงลำดับ (เร็วกว่ารอตามคิว)
         from concurrent.futures import as_completed
         for future in as_completed(futures):
             res = future.result()
@@ -287,7 +318,6 @@ def video_feed_old():
     pwd = request.args.get('pwd', '')
     path = request.args.get('path', 'onvif1')
     
-    # สร้าง URL ตามรูปแบบ RTSP มาตรฐาน
     if user and pwd:
         rtsp_url = f"rtsp://{user}:{pwd}@{ip}:554/{path}"
     else:
@@ -302,6 +332,12 @@ def index_servo():
 
 @app.route('/move', methods=['POST'])
 def move():
+    global servo, state
+    
+    # เช็คว่าได้ตั้งค่าขา GPIO หรือยัง
+    if servo is None:
+        return jsonify({"status": "error", "message": "กรุณาตั้งค่าขา GPIO (Setup Servo) ก่อนสั่งงาน"}), 400
+        
     try:
         data = request.get_json()
         direction = data.get('direction')
@@ -321,26 +357,22 @@ def move():
         # ตัดสัญญาณทันทีเพื่อป้องกันการหมุนไม่หยุด (Continuous Rotation Fix)
         servo.detach() 
         
-        return jsonify({"status": "ok", "angle": state["angle"]})
+        return jsonify({"status": "ok", "angle": state["angle"], "pin": servo_pin})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 400
 
-
 # ล้างค่า GPIO เมื่อปิดโปรแกรม
 def cleanup():
-    if servo :
+    global servo
+    if servo:
         servo.angle = 0
         sleep(0.2)
         servo.value = None
 
 if __name__ == '__main__':
     try:
-
         app.run(host='0.0.0.0', port=8000, debug=False, threaded=True)
     except KeyboardInterrupt:
-        #cleanup()
         print("close")
     finally:
-        #cleanup()
-
         print("close")
