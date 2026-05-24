@@ -16,10 +16,11 @@ factory = LGPIOFactory()
 
 app = Flask(__name__) 
 
-# ตัวแปร Global สำหรับ Servo
-servo = None
-servo_pin = None
-state = {"angle": 90}
+# ตัวแปร Global สำหรับจัดการ Servo 2 ตัว (1=ซ้ายขวา, 2=ขึ้นลง)
+servos_config = {
+    "1": {"obj": None, "pin": None, "angle": 90, "name": "ซ้าย - ขวา (Pan)"},
+    "2": {"obj": None, "pin": None, "angle": 90, "name": "ขึ้น - ลง (Tilt)"}
+}
 
 # 1. Quick Scan Ports: รายการพอร์ตสำหรับสแกนเร็วเพื่อระบุประเภทอุปกรณ์
 COMMON_PORTS = [
@@ -64,7 +65,6 @@ def get_mac_address(ip):
     try:
         with open('/proc/net/arp', 'r') as f:
             data = f.read()
-        # Regex หา MAC Address ที่ตรงกับ IP
         pattern = re.compile(re.escape(ip) + r'\s+\w+\s+\w+\s+([0-9a-fA-F:]+)\s+')
         match = pattern.search(data)
         if match: return match.group(1).upper()
@@ -82,25 +82,20 @@ def resolve_vendor(mac):
 def identify_device_type(ports, vendor):
     """สมองกล: วิเคราะห์ประเภทอุปกรณ์จาก Port และ Vendor"""
     
-    # 1. CCTV / DVR / NVR (Priority สูงสุด)
     if 37777 in ports: return "Dahua Device", "fa-video", "bg-camera"
     if 34567 in ports: return "XMeye/China DVR", "fa-video", "bg-camera"
     if 8200 in ports: return "Hikvision Device", "fa-video", "bg-camera"
     if 554 in ports or 1935 in ports: return "IP Camera/NVR", "fa-video", "bg-camera"
     
-    # 2. IoT & Infrastructure
     if 1883 in ports: return "MQTT Broker/IoT", "fa-microchip", "bg-iot"
     if 3306 in ports or 5432 in ports: return "Database Server", "fa-database", "bg-warning text-dark"
     if 9000 in ports: return "Portainer/Docker", "fa-docker", "bg-info text-dark"
 
-    # 3. Server / OS
     if 22 in ports and ("Raspberry" in vendor or "Linux" in vendor): return "Linux Server", "fa-server", "bg-server"
     if 111 in ports: return "Unix/Linux Device", "fa-linux", "bg-server"
 
-    # 4. Web Application
     if any(p in ports for p in [80, 443,8000, 4000,8080, 3000, 5000,6080,7681]): return "Web Server/App", "fa-globe", "bg-light text-dark"
 
-    # 5. Fallback by Vendor
     if "Espressif" in vendor: return "ESP32 Device", "fa-microchip", "bg-iot"
     if "Apple" in vendor: return "Apple Device", "fa-apple", "bg-light text-dark"
     if "Synology" in vendor: return "NAS Storage", "fa-hdd", "bg-secondary text-white"
@@ -108,7 +103,7 @@ def identify_device_type(ports, vendor):
     return "Network Device", "fa-network-wired", "bg-light text-dark"
 
 def check_port(ip, port, timeout=0.0):
-    """ตรวจสอบสถานะพอร์ต (Open/Closed) - ปรับ timeout ให้สั้นลง"""
+    """ตรวจสอบสถานะพอร์ต (Open/Closed)"""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(timeout)
     try:
@@ -116,7 +111,7 @@ def check_port(ip, port, timeout=0.0):
         sock.close()
         return port if res == 0 else None
     except:
-        sock.close() # Ensure close on error
+        sock.close() 
         return None
 
 def quick_scan_host(ip):
@@ -194,7 +189,7 @@ def video_feed():
     user = request.args.get('user', 'admin') 
     pwd = request.args.get('pwd')
     path = request.args.get('path', 'onvif1') 
-    port = request.args.get('port',554)
+    port = request.args.get('port', 554)
 
     if pwd:
         rtsp_url = f"rtsp://{user}:{pwd}@{ip}:{port}/{path}"
@@ -219,12 +214,11 @@ def system_stats():
     ram_info = psutil.virtual_memory()
     disk_info = psutil.disk_usage('/')
     
-    # อ่านค่าความร้อนจาก Raspberry Pi
     try:
         with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
             temp_c = float(f.read()) / 1000.0
     except:
-        temp_c = 0.0 # กรณีไม่ได้รันบนบอร์ดที่รองรับเซ็นเซอร์นี้
+        temp_c = 0.0 
         
     return jsonify({
         "status": "ok",
@@ -239,23 +233,78 @@ def system_stats():
 @app.route('/api/setup_servo', methods=['POST'])
 def setup_servo():
     """API ตั้งค่าหมายเลข GPIO ขาของ Servo"""
-    global servo, servo_pin, state
+    global servos_config
     try:
         data = request.get_json()
+        servo_id = str(data.get('servo_id', '1'))
         pin = int(data.get('pin'))
         
-        # ปิดการเชื่อมต่อขาเก่า (ถ้ามี)
-        if servo is not None:
-            servo.close()
+        if servo_id not in servos_config:
+            return jsonify({"status": "error", "message": "ไม่พบ Servo ID ในระบบ"}), 400
             
-        # สร้างออบเจ็กต์ Servo ใหม่ โดยกำหนดองศาเป็น 0 ถึง 180 ตามตรรกะเดิมของคุณ
-        servo = AngularServo(pin, min_angle=0, max_angle=180, pin_factory=factory)
-        servo_pin = pin
-        state["angle"] = 90 # เริ่มต้นที่กึ่งกลาง
+        if servos_config[servo_id]["obj"] is not None:
+            servos_config[servo_id]["obj"].close()
+            
+        servos_config[servo_id]["obj"] = AngularServo(pin, min_angle=0, max_angle=180, pin_factory=factory)
+        servos_config[servo_id]["pin"] = pin
+        servos_config[servo_id]["angle"] = 90 
         
-        return jsonify({"status": "ok", "message": f"ตั้งค่า Servo ที่ขา GPIO {pin} สำเร็จ", "current_angle": state["angle"]})
+        return jsonify({
+            "status": "ok", 
+            "message": "ตั้งค่าสำเร็จ", 
+            "current_angle": servos_config[servo_id]["angle"],
+            "servo_id": servo_id
+        })
     except Exception as e:
         return jsonify({"status": "error", "message": f"ไม่สามารถตั้งค่า GPIO ได้: {str(e)}"}), 400
+
+@app.route('/move', methods=['POST'])
+def move():
+    """API ควบคุม Servo ตาม ID ที่ระบุ"""
+    global servos_config
+    try:
+        data = request.get_json()
+        servo_id = str(data.get('servo_id', '1'))
+        direction = data.get('direction')
+        step = 5 
+
+        if servo_id not in servos_config or servos_config[servo_id]["obj"] is None:
+            return jsonify({"status": "error", "message": f"ไม่ได้ต่อสาย Servo {servo_id}"}), 400
+            
+        current_angle = servos_config[servo_id]["angle"]
+        target_servo = servos_config[servo_id]["obj"]
+
+        # รองรับซ้ายขวา (ID 1) และขึ้นลง (ID 2)
+        if direction == 'left' or direction == 'down':
+            current_angle = max(0, current_angle - step)
+        elif direction == 'right' or direction == 'up':
+            current_angle = min(180, current_angle + step)
+
+        servos_config[servo_id]["angle"] = current_angle
+        target_servo.angle = current_angle
+        
+        time.sleep(0.15)
+        target_servo.detach() 
+        
+        return jsonify({
+            "status": "ok", 
+            "angle": current_angle, 
+            "pin": servos_config[servo_id]["pin"],
+            "servo_id": servo_id
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+@app.route('/api/get_servos_status')
+def get_servos_status():
+    """API ดึงสถานะปัจจุบันของเซอร์โวทั้ง 2 ตัวไปเช็คที่หน้ากล้อง"""
+    global servos_config
+    return jsonify({
+        "servo1_connected": servos_config["1"]["obj"] is not None,
+        "servo1_angle": servos_config["1"]["angle"],
+        "servo2_connected": servos_config["2"]["obj"] is not None,
+        "servo2_angle": servos_config["2"]["angle"]
+    })
 
 # ==========================================
 # FLASK ROUTES
@@ -267,13 +316,13 @@ def index():
     subnet = '.'.join(local_ip.split('.')[:-1]) + '.'
     return render_template('index.html', local_ip=local_ip, subnet=subnet)
 
-@app.route('/live')
-def index_live():
-    return render_template('live.html')
+@app.route('/camera')
+def index_camera():
+    """เปลี่ยนจากหน้า /live เดิม เป็นหน้าควบคุม /camera แบบ PTZ อัตโนมัติ"""
+    return render_template('camera.html')
 
 @app.route('/scan_network', methods=['POST'])
 def scan_network():
-    """API: สแกนอุปกรณ์ในวงแลน (Quick Scan)"""
     data = request.json
     subnet = data.get('subnet')
     
@@ -287,12 +336,10 @@ def scan_network():
         results = list(filter(None, executor.map(quick_scan_host, ips)))
     
     results.sort(key=lambda x: int(x['ip'].split('.')[-1]))
-    
     return jsonify({'results': results})
 
 @app.route('/deep_scan', methods=['POST'])
 def deep_scan():
-    """API: สแกน 65,535 Ports (Deep Scan)"""
     target_ip = request.json.get('ip')
     print(f"Deep scanning target: {target_ip}")
     
@@ -312,7 +359,6 @@ def deep_scan():
 
 @app.route('/video_feedold')
 def video_feed_old():
-    """Route สำหรับ <img> tag เพื่อแสดงภาพสด"""
     ip = request.args.get('ip')
     user = request.args.get('user', '')
     pwd = request.args.get('pwd', '')
@@ -323,56 +369,30 @@ def video_feed_old():
     else:
         rtsp_url = f"rtsp://{ip}:554/{path}"
         
-    print(f"Streaming from: {rtsp_url}")
     return Response(generate_frames(rtsp_url), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/servo')
 def index_servo():
     return render_template('servo.html')
 
-@app.route('/move', methods=['POST'])
-def move():
-    global servo, state
-    
-    # เช็คว่าได้ตั้งค่าขา GPIO หรือยัง
-    if servo is None:
-        return jsonify({"status": "error", "message": "กรุณาตั้งค่าขา GPIO (Setup Servo) ก่อนสั่งงาน"}), 400
-        
-    try:
-        data = request.get_json()
-        direction = data.get('direction')
-        step = 5 # ปรับความละเอียดตรงนี้ (ขยับทีละ 5 องศา)
-
-        if direction == 'left':
-            state["angle"] = max(0, state["angle"] - step)
-        elif direction == 'right':
-            state["angle"] = min(180, state["angle"] + step)
-
-        # สั่งงาน Servo
-        servo.angle = state["angle"]
-        
-        # รอให้มอเตอร์เคลื่อนที่ครู่หนึ่ง
-        time.sleep(0.15)
-        
-        # ตัดสัญญาณทันทีเพื่อป้องกันการหมุนไม่หยุด (Continuous Rotation Fix)
-        servo.detach() 
-        
-        return jsonify({"status": "ok", "angle": state["angle"], "pin": servo_pin})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 400
-
-# ล้างค่า GPIO เมื่อปิดโปรแกรม
 def cleanup():
-    global servo
-    if servo:
-        servo.angle = 0
-        sleep(0.2)
-        servo.value = None
+    global servos_config
+    for sid, sdata in servos_config.items():
+        if sdata["obj"] is not None:
+            try:
+                sdata["obj"].angle = 0
+                sleep(0.2)
+                sdata["obj"].value = None
+                sdata["obj"].close()
+            except:
+                pass
 
 if __name__ == '__main__':
     try:
         app.run(host='0.0.0.0', port=8000, debug=False, threaded=True)
     except KeyboardInterrupt:
+        cleanup()
         print("close")
     finally:
+        cleanup()
         print("close")
