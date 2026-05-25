@@ -9,6 +9,7 @@ import sys
 import psutil
 import os
 import json
+import subprocess
 from gpiozero import AngularServo
 from gpiozero.pins.lgpio import LGPIOFactory
 from time import sleep
@@ -40,7 +41,6 @@ CONFIG_FILE = 'servo_config.json'
 # AUTO SAVE/LOAD SYSTEM สำหรับ Servo
 # ==========================================
 def save_servo_config():
-    """บันทึกการตั้งค่า Servo ลงไฟล์ JSON"""
     try:
         data_to_save = {
             "1": {"type": servos_config["1"]["type"], "pin": servos_config["1"]["pin"]},
@@ -53,7 +53,6 @@ def save_servo_config():
         print(f"[ERROR] ไม่สามารถบันทึกไฟล์ตั้งค่าได้: {e}")
 
 def load_servo_config():
-    """โหลดและเชื่อมต่อ Servo อัตโนมัติเมื่อเปิดโปรแกรม"""
     global servos_config
     if os.path.exists(CONFIG_FILE):
         try:
@@ -80,6 +79,123 @@ def load_servo_config():
             print("[SYSTEM] โหลดการตั้งค่า Servo ล่าสุดสำเร็จ")
         except Exception as e:
             print(f"[ERROR] ไฟล์ตั้งค่าเสียหาย หรือโหลดไม่สำเร็จ: {e}")
+
+# ==========================================
+# WIRELESS MANAGEMENT (WI-FI, AP FALLBACK & BLUETOOTH)
+# ==========================================
+
+def enable_ap_mode():
+    """เปิดโหมด Access Point (Hotspot) ผ่าน nmcli"""
+    print("[SYSTEM] เครือข่ายไม่มีการเชื่อมต่อ กำลังเปิดโหมด AP (Hotspot)...")
+    try:
+        # ตัดการเชื่อมต่อเดิมที่อาจค้างอยู่
+        subprocess.run(['sudo', 'nmcli', 'device', 'disconnect', 'wlan0'], capture_output=True)
+        # ลบโปรไฟล์ Hotspot เก่า (ถ้ามี) เพื่อสร้างใหม่
+        subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'Hotspot'], capture_output=True)
+        
+        # สร้าง Hotspot ใหม่ SSID: Pi5_Setup, Password: 12345678
+        res = subprocess.run(['sudo', 'nmcli', 'device', 'wifi', 'hotspot', 'ifname', 'wlan0', 'ssid', 'Pi5_Setup', 'password', '12345678'], capture_output=True, text=True)
+        
+        if res.returncode == 0:
+            print("[SYSTEM] เปิด AP Mode สำเร็จ: SSID=Pi5_Setup, Password=12345678")
+        else:
+            print(f"[ERROR] ไม่สามารถเปิด AP Mode ได้: {res.stderr}")
+    except Exception as e:
+        print(f"[ERROR] เกิดข้อผิดพลาดขณะเปิด AP Mode: {e}")
+
+def check_network_and_fallback():
+    """ตรวจสอบ IP หากเป็น 127.0.0.1 ให้เปิดโหมด AP"""
+    ip = get_local_ip()
+    if ip == '127.0.0.1':
+        enable_ap_mode()
+    else:
+        print(f"[SYSTEM] พบการเชื่อมต่อเครือข่าย IP ปัจจุบัน: {ip}")
+
+@app.route('/api/wifi/scan')
+def wifi_scan():
+    """ใช้ nmcli สแกนหา Wi-Fi รอบๆ เครื่อง (Raspberry Pi Bookworm ใช้ NetworkManager)"""
+    try:
+        # ดึงข้อมูลรูปแบบ SSID:SIGNAL:SECURITY
+        res = subprocess.check_output(['nmcli', '-t', '-f', 'SSID,SIGNAL,SECURITY', 'dev', 'wifi'], timeout=10).decode('utf-8')
+        networks = []
+        for line in res.split('\n'):
+            if line.strip():
+                parts = line.split(':')
+                if len(parts) >= 3 and parts[0]: # ต้องมีชื่อ SSID
+                    networks.append({'ssid': parts[0], 'signal': int(parts[1]), 'security': parts[2]})
+        
+        # กรองเอาเฉพาะชื่อที่ไม่ซ้ำ (เอาสัญญาณแรงสุด)
+        unique_nets = {}
+        for n in networks:
+            if n['ssid'] not in unique_nets or n['signal'] > unique_nets[n['ssid']]['signal']:
+                unique_nets[n['ssid']] = n
+                
+        return jsonify({"status": "ok", "networks": list(unique_nets.values())})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e), "networks": []}), 500
+
+@app.route('/api/wifi/connect', methods=['POST'])
+def wifi_connect():
+    """สั่งเชื่อมต่อ Wi-Fi ด้วย nmcli"""
+    data = request.get_json()
+    ssid = data.get('ssid')
+    password = data.get('password')
+    try:
+        # ปิดและลบโหมด Hotspot ก่อนจะเชื่อมต่อ Wi-Fi ปลายทาง เพื่อป้องกันการชนกันของ Interface
+        subprocess.run(['sudo', 'nmcli', 'connection', 'down', 'Hotspot'], capture_output=True)
+        subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'Hotspot'], capture_output=True)
+        
+        if password:
+            result = subprocess.run(['sudo', 'nmcli', 'dev', 'wifi', 'connect', ssid, 'password', password], capture_output=True, text=True, timeout=20)
+        else:
+            result = subprocess.run(['sudo', 'nmcli', 'dev', 'wifi', 'connect', ssid], capture_output=True, text=True, timeout=20)
+            
+        if result.returncode == 0:
+            return jsonify({"status": "ok", "message": f"เชื่อมต่อ {ssid} สำเร็จ"})
+        else:
+            # ถ้าเชื่อมต่อไม่สำเร็จ ให้เช็คและกลับไปเปิด AP อีกรอบ
+            check_network_and_fallback()
+            return jsonify({"status": "error", "message": result.stderr})
+    except Exception as e:
+        check_network_and_fallback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/bt/scan')
+def bt_scan():
+    """สแกน Bluetooth ใช้ bluetoothctl"""
+    try:
+        # เปิดสแกนทิ้งไว้ 5 วินาที
+        subprocess.run(['bluetoothctl', '--timeout', '5', 'scan', 'on'], capture_output=True)
+        # ดึงรายชื่ออุปกรณ์
+        res = subprocess.check_output(['bluetoothctl', 'devices']).decode('utf-8')
+        devices = []
+        for line in res.split('\n'):
+            if line.startswith('Device '):
+                parts = line.split(' ', 2)
+                if len(parts) >= 3:
+                    mac = parts[1]
+                    name = parts[2]
+                    # กรองพวกที่ชื่อเป็น MAC ล้วนๆ ออกให้ดูสะอาดขึ้น
+                    if '-' not in name: 
+                        devices.append({"mac": mac, "name": name})
+        return jsonify({"status": "ok", "devices": devices})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e), "devices": []}), 500
+
+@app.route('/api/bt/connect', methods=['POST'])
+def bt_connect():
+    """จับคู่และเชื่อมต่อ Bluetooth"""
+    data = request.get_json()
+    mac = data.get('mac')
+    try:
+        subprocess.run(['bluetoothctl', 'pair', mac], timeout=10)
+        result = subprocess.run(['bluetoothctl', 'connect', mac], capture_output=True, text=True, timeout=10)
+        if "Successful" in result.stdout or result.returncode == 0:
+            return jsonify({"status": "ok", "message": "จับคู่สำเร็จ"})
+        else:
+            return jsonify({"status": "error", "message": "เชื่อมต่อไม่สำเร็จ ดูที่อุปกรณ์ปลายทาง"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 # ==========================================
 # NETWORK CORE FUNCTIONS
@@ -300,9 +416,7 @@ def setup_servo():
             servos_config[servo_id]["obj"].angle = 90
             servos_config[servo_id]["connected"] = True
 
-        # เซฟการตั้งค่าทันทีที่สำเร็จ
         save_servo_config()
-
         return jsonify({"status": "ok", "message": f"ตั้งค่าแบบ {conn_type.upper()} ขา {pin} สำเร็จและบันทึกแล้ว", "current_angle": 90, "servo_id": servo_id})
     except Exception as e:
         return jsonify({"status": "error", "message": f"ไม่สามารถตั้งค่า Servo ได้: {str(e)}"}), 400
@@ -378,9 +492,7 @@ def index_camera(): return render_template('camera.html')
 def index_servo(): return render_template('servo.html')
 
 @app.route('/control')
-def index_control(): 
-    """หน้ารวม Master Control (กล้อง Pi + บังคับมอเตอร์)"""
-    return render_template('control.html')
+def index_control(): return render_template('control.html')
 
 @app.route('/scan_network', methods=['POST'])
 def scan_network():
@@ -418,8 +530,9 @@ def cleanup():
 
 if __name__ == '__main__':
     try:
-        # โหลดค่าคอนฟิก Servo ที่เคยบันทึกไว้ขึ้นมาเชื่อมต่อฮาร์ดแวร์ทันที
         load_servo_config()
+        # ตรวจสอบเครือข่ายก่อนรัน Flask Server
+        check_network_and_fallback()
         app.run(host='0.0.0.0', port=8000, debug=False, threaded=True)
     except KeyboardInterrupt:
         cleanup()
