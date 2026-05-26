@@ -12,6 +12,8 @@ sudo apt update
 echo "[2/5] Enabling I2C Interface..."
 sudo raspi-config nonint do_i2c 0
 
+sudo apt-get install dnsmasq-base -y
+
 echo "[3/5] Installing system dependencies via apt..."
 sudo apt install -y python3-pip libgl1 libglib2.0-0 python3-lgpio swig python3-dev build-essential liblgpio-dev i2c-tools python3-libgpiod
 
