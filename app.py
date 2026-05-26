@@ -85,16 +85,26 @@ def load_servo_config():
 # ==========================================
 
 def enable_ap_mode():
-    """เปิดโหมด Access Point (Hotspot) ผ่าน nmcli"""
+    """เปิดโหมด Access Point (Hotspot) ผ่าน nmcli แบบกำหนดเองเพื่อป้องกันปัญหา DHCP"""
     print("[SYSTEM] เครือข่ายไม่มีการเชื่อมต่อ กำลังเปิดโหมด AP (Hotspot)...")
     try:
         # ตัดการเชื่อมต่อเดิมที่อาจค้างอยู่
         subprocess.run(['sudo', 'nmcli', 'device', 'disconnect', 'wlan0'], capture_output=True)
-        # ลบโปรไฟล์ Hotspot เก่า (ถ้ามี) เพื่อสร้างใหม่
+        
+        # ลบโปรไฟล์ Hotspot ทั้งชื่อเก่าและใหม่ (ถ้ามี)
+        subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'Pi5_Hotspot'], capture_output=True)
         subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'Hotspot'], capture_output=True)
         
-        # สร้าง Hotspot ใหม่ SSID: Pi5_Setup, Password: 12345678
-        res = subprocess.run(['sudo', 'nmcli', 'device', 'wifi', 'hotspot', 'ifname', 'wlan0', 'ssid', 'Pi5_Setup', 'password', '12345678'], capture_output=True, text=True)
+        # หน่วงเวลาให้ NetworkManager เคลียร์สถานะ Interface ให้สมบูรณ์ ป้องกัน Race condition
+        time.sleep(2)
+        
+        # สร้าง Profile ใหม่แบบเจาะจง ให้แชร์เน็ตเวิร์คและแจก IP (ipv4.method shared)
+        subprocess.run(['sudo', 'nmcli', 'connection', 'add', 'type', 'wifi', 'ifname', 'wlan0', 'con-name', 'Pi5_Hotspot', 'autoconnect', 'yes', 'ssid', 'Pi5_Setup'], capture_output=True)
+        subprocess.run(['sudo', 'nmcli', 'connection', 'modify', 'Pi5_Hotspot', '802-11-wireless.mode', 'ap', '802-11-wireless.band', 'bg', 'ipv4.method', 'shared'], capture_output=True)
+        subprocess.run(['sudo', 'nmcli', 'connection', 'modify', 'Pi5_Hotspot', 'wifi-sec.key-mgmt', 'wpa-psk', 'wifi-sec.psk', '12345678'], capture_output=True)
+        
+        # สั่งเปิดการเชื่อมต่อ
+        res = subprocess.run(['sudo', 'nmcli', 'connection', 'up', 'Pi5_Hotspot'], capture_output=True, text=True)
         
         if res.returncode == 0:
             print("[SYSTEM] เปิด AP Mode สำเร็จ: SSID=Pi5_Setup, Password=12345678")
@@ -142,8 +152,13 @@ def wifi_connect():
     password = data.get('password')
     try:
         # ปิดและลบโหมด Hotspot ก่อนจะเชื่อมต่อ Wi-Fi ปลายทาง เพื่อป้องกันการชนกันของ Interface
+        subprocess.run(['sudo', 'nmcli', 'connection', 'down', 'Pi5_Hotspot'], capture_output=True)
+        subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'Pi5_Hotspot'], capture_output=True)
         subprocess.run(['sudo', 'nmcli', 'connection', 'down', 'Hotspot'], capture_output=True)
         subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'Hotspot'], capture_output=True)
+        
+        # หน่วงเวลาให้ wlan0 ว่างพร้อมเชื่อมต่อ
+        time.sleep(2)
         
         if password:
             result = subprocess.run(['sudo', 'nmcli', 'dev', 'wifi', 'connect', ssid, 'password', password], capture_output=True, text=True, timeout=20)
