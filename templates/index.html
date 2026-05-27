@@ -216,13 +216,13 @@
                     if (device.ports.includes(5000)) {
                         actionButtons += `<a href="http://${device.ip}:5000" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm">Web</a>`;
                     }
-                    if (device.ports.includes(7186)) {
-                        actionButtons += `<a href="http://${device.ip}:7186" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm">SSH</a>`;
+                    if (device.ports.includes(7681)) {
+                        actionButtons += `<a href="http://${device.ip}:7681" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm">SSH</a>`;
                     }
                     // สมองกล: ถ้าเจอเว็บแอป (80, 443, 8080) สร้างปุ่มเปิดเว็บ
                     if (device.ports.includes(80) || device.ports.includes(443) || device.ports.includes(8080) || device.ports.includes(3000)) {
                         let proto = device.ports.includes(443) ? 'https' : 'http';
-                        let mainPort = device.ports.find(p => [8080, 8000, 3000, 81].includes(p));
+                        let mainPort = device.ports.find(p => [8080, 8000, 3000, 81,5000,9000].includes(p));
                         let p_append = (device.ports.includes(80) || device.ports.includes(443) && !mainPort) ? '' : ':' + mainPort;
                         if(p_append === ':undefined') p_append = '';
                         
