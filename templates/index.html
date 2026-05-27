@@ -216,8 +216,8 @@
                     if (device.ports.includes(5000)) {
                         actionButtons += `<a href="http://${device.ip}:5000" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm">Web</a>`;
                     }
-                    if (device.ports.includes(8176)) {
-                        actionButtons += `<a href="http://${device.ip}:8176" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm">SSH</a>`;
+                    if (device.ports.includes(7186)) {
+                        actionButtons += `<a href="http://${device.ip}:7186" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm">SSH</a>`;
                     }
                     // สมองกล: ถ้าเจอเว็บแอป (80, 443, 8080) สร้างปุ่มเปิดเว็บ
                     if (device.ports.includes(80) || device.ports.includes(443) || device.ports.includes(8080) || device.ports.includes(3000)) {
