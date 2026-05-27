@@ -208,9 +208,17 @@
                     // สมองกล: ถ้าเจอกล้องวงจรปิด (พอร์ต RTSP/NVR) สร้างปุ่มดูภาพ
                     if (device.ports.includes(554) || device.ports.includes(37777) || device.ports.includes(34567) || device.badge_class === 'bg-camera') {
                         // ส่งไปหน้า /camera
-                        actionButtons += `<a href="/camera?ip=${device.ip}" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm"><i class="fa-solid fa-play"></i> Live View</a>`;
+                        actionButtons += `<a href="/live?ip=${device.ip}" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm"><i class="fa-solid fa-play"></i> Live View</a>`;
                     }
-                    
+                    if (device.ports.includes(6080)) {
+                        actionButtons += `<a href="http://${device.ip}:6080" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm">VNV</a>`;
+                    }
+                    if (device.ports.includes(5000)) {
+                        actionButtons += `<a href="http://${device.ip}:5000" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm">Web</a>`;
+                    }
+                    if (device.ports.includes(8176)) {
+                        actionButtons += `<a href="http://${device.ip}:8176" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm">SSH</a>`;
+                    }
                     // สมองกล: ถ้าเจอเว็บแอป (80, 443, 8080) สร้างปุ่มเปิดเว็บ
                     if (device.ports.includes(80) || device.ports.includes(443) || device.ports.includes(8080) || device.ports.includes(3000)) {
                         let proto = device.ports.includes(443) ? 'https' : 'http';
