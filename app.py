@@ -144,10 +144,17 @@ def check_network_and_fallback():
 
 @app.route('/api/wifi/scan')
 def wifi_scan():
-    """ใช้ nmcli สแกนหา Wi-Fi รอบๆ เครื่อง (Raspberry Pi Bookworm ใช้ NetworkManager)"""
+    """ใช้ nmcli สแกนหา Wi-Fi รอบๆ เครื่อง (เพิ่ม Timeout และ Rescan)"""
     try:
-        # ดึงข้อมูลรูปแบบ SSID:SIGNAL:SECURITY
-        res = subprocess.check_output(['nmcli', '-t', '-f', 'SSID,SIGNAL,SECURITY', 'dev', 'wifi'], timeout=10).decode('utf-8')
+        # สั่งกระตุ้นการสแกนรอบใหม่ก่อน (เผื่อบอร์ดหลับหรือได้ข้อมูลเก่า)
+        try:
+            subprocess.run(['sudo', 'nmcli', 'dev', 'wifi', 'rescan'], timeout=5, capture_output=True)
+            time.sleep(2) # หน่วงเวลารอรับผลสแกนใหม่
+        except subprocess.TimeoutExpired:
+            pass # ถ้า rescan timeout ช่างมัน ให้ไปพยายามดึงข้อมูลแทน
+            
+        # ดึงข้อมูลรูปแบบ SSID:SIGNAL:SECURITY (เพิ่ม sudo และขยายเวลา timeout เป็น 20 วินาที)
+        res = subprocess.check_output(['sudo', 'nmcli', '-t', '-f', 'SSID,SIGNAL,SECURITY', 'dev', 'wifi'], timeout=20).decode('utf-8')
         networks = []
         for line in res.split('\n'):
             if line.strip():
@@ -162,6 +169,10 @@ def wifi_scan():
                 unique_nets[n['ssid']] = n
                 
         return jsonify({"status": "ok", "networks": list(unique_nets.values())})
+        
+    except subprocess.TimeoutExpired:
+        # ดักจับ Timeout และส่งข้อความภาษาไทยแจ้งผู้ใช้งาน
+        return jsonify({"status": "error", "message": "หมดเวลาในการสแกน (Timeout) โมดูล Wi-Fi อาจกำลังยุ่ง กรุณากด Rescan อีกครั้ง", "networks": []}), 500
     except Exception as e:
         return jsonify({"status": "error", "message": str(e), "networks": []}), 500
 
