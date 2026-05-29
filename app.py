@@ -114,12 +114,33 @@ def enable_ap_mode():
         print(f"[ERROR] เกิดข้อผิดพลาดขณะเปิด AP Mode: {e}")
 
 def check_network_and_fallback():
-    """ตรวจสอบ IP หากเป็น 127.0.0.1 ให้เปิดโหมด AP"""
+    """ตรวจสอบการเชื่อมต่อเครือข่าย พยายามสแกนและเชื่อมต่อ Wi-Fi เดิมก่อน หากไม่ได้ให้เปิด AP Mode"""
+    print("[SYSTEM] กำลังตรวจสอบสถานะเครือข่าย...")
+    
+    # รอบแรก: ลองเช็คดูว่าได้ IP หรือยัง (กรณีต่อสาย LAN หรือ Wi-Fi เกาะอัตโนมัติสำเร็จแล้ว)
+    ip = get_local_ip()
+    if ip != '127.0.0.1':
+        print(f"[SYSTEM] พบการเชื่อมต่อเครือข่ายสำเร็จ IP ปัจจุบัน: {ip}")
+        return
+
+    # กรณีไม่ได้ IP: พยายามเปิดใช้งาน wlan0 และสั่งให้ NetworkManager ค้นหา/เชื่อมต่อโปรไฟล์เดิมที่มีอยู่
+    print("[SYSTEM] ไม่พบ IP, กำลังพยายามเปิดการค้นหา Wi-Fi และเชื่อมต่ออัตโนมัติ...")
+    try:
+        subprocess.run(['sudo', 'nmcli', 'radio', 'wifi', 'on'], capture_output=True)
+        time.sleep(1)
+        # สั่งสแกนหนึ่งรอบเพื่อกระตุ้นให้บอร์ดเห็นเราเตอร์รอบตัว
+        subprocess.run(['sudo', 'nmcli', 'dev', 'wifi', 'rescan'], capture_output=True)
+        time.sleep(4) # รอให้ระบบคุยกับ Access Point เดิมสักครู่
+    except Exception as e:
+        print(f"[WARNING] ไม่สามารถสั่ง rescan wifi ได้: {e}")
+
+    # เช็ค IP อีกครั้งหลังจากสั่งสแกน/กระตุ้นการเชื่อมต่อ
     ip = get_local_ip()
     if ip == '127.0.0.1':
+        print("[SYSTEM] ไม่สามารถเชื่อมต่อ Wi-Fi ที่บันทึกไว้ได้")
         enable_ap_mode()
     else:
-        print(f"[SYSTEM] พบการเชื่อมต่อเครือข่าย IP ปัจจุบัน: {ip}")
+        print(f"[SYSTEM] เชื่อมต่อ Wi-Fi เดิมสำเร็จ IP ปัจจุบัน: {ip}")
 
 @app.route('/api/wifi/scan')
 def wifi_scan():
@@ -216,14 +237,14 @@ def bt_connect():
 # NETWORK CORE FUNCTIONS
 # ==========================================
 COMMON_PORTS = [
-    21, 22, 23,43, 53, 80, 81, 111, 443,
+    21, 22, 23, 43, 53, 80, 81, 111, 443,
     554, 1935,
     1883, 8883,
     3306, 5432, 27017,
     3000, 4000, 5000, 6080, 7681, 7000,
     8000, 8008, 8009, 8080, 8081, 8090, 8092,
     8200, 8443, 8899, 9000, 9080,
-    34567, 37777, 37778,37779
+    34567, 37777, 37778, 37779
 ]
 
 MAC_VENDORS = {
@@ -276,7 +297,7 @@ def identify_device_type(ports, vendor):
     if 22 in ports and ("Raspberry" in vendor or "Linux" in vendor): return "Linux Server", "fa-server", "bg-server"
     if 111 in ports: return "Unix/Linux Device", "fa-linux", "bg-server"
 
-    if any(p in ports for p in [80, 443,8000, 4000,8080, 3000, 5000,6080,7681]): return "Web Server/App", "fa-globe", "bg-light text-dark"
+    if any(p in ports for p in [80, 443, 8000, 4000, 8080, 3000, 5000, 6080, 7681]): return "Web Server/App", "fa-globe", "bg-light text-dark"
     if "Espressif" in vendor: return "ESP32 Device", "fa-microchip", "bg-iot"
     if "Apple" in vendor: return "Apple Device", "fa-apple", "bg-light text-dark"
     if "Synology" in vendor: return "NAS Storage", "fa-hdd", "bg-secondary text-white"
@@ -546,7 +567,7 @@ def cleanup():
 if __name__ == '__main__':
     try:
         load_servo_config()
-        # ตรวจสอบเครือข่ายก่อนรัน Flask Server
+        # ตรวจสอบเครือข่ายก่อนรัน Flask Server (พยายามสแกนเกาะวงเดิมก่อน Fallback)
         check_network_and_fallback()
         app.run(host='0.0.0.0', port=8000, debug=False, threaded=True)
     except KeyboardInterrupt:
