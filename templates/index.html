@@ -41,6 +41,10 @@
         }
         .stat-box:hover { border-color: #0dcaf0; }
         .stat-value { font-size: 1.5rem; font-weight: bold; margin-top: 10px; font-family: monospace;}
+        
+        /* สไตล์เพิ่มเติมสำหรับ Wi-Fi Modal */
+        .wifi-item { cursor: pointer; transition: background-color 0.2s; }
+        .wifi-item:hover { background-color: #2c3034 !important; }
     </style>
 </head>
 <body>
@@ -58,6 +62,9 @@
                 <span class="navbar-text me-4 text-light border border-secondary rounded px-3 py-1 bg-dark">
                     <i class="fa-solid fa-server text-warning"></i> Local IP: <strong class="text-info">{{ local_ip }}</strong>
                 </span>
+                <button type="button" class="btn btn-outline-success btn-sm me-2 fw-bold" onclick="openWifiModal()">
+                    <i class="fa-solid fa-wifi"></i> Wi-Fi Setup
+                </button>
                 <a href="/live" class="btn btn-outline-danger btn-sm me-2 fw-bold"><i class="fa-solid fa-video"></i> CCTV Viewer</a>
                 <a href="/control" class="btn btn-primary btn-sm me-2 fw-bold shadow"><i class="fa-solid fa-gamepad"></i> Master Control</a>
                 <a href="/camera" class="btn btn-outline-info btn-sm me-2 fw-bold"><i class="fa-solid fa-camera"></i> Pi Camera</a>
@@ -144,8 +151,56 @@
         </div>
     </div>
 
+    <div class="modal fade" id="wifiModal" tabindex="-1" aria-labelledby="wifiModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title fw-bold text-info" id="wifiModalLabel"><i class="fa-solid fa-wifi"></i> Available Wi-Fi Networks</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <div id="wifi-list" class="list-group list-group-flush">
+                        </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-info fw-bold" onclick="scanWifi()"><i class="fa-solid fa-rotate-right"></i> Rescan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="wifiConnectModal" tabindex="-1" aria-labelledby="wifiConnectModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title fw-bold text-success" id="wifiConnectModalLabel"><i class="fa-solid fa-link"></i> Connect to Network</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>กำลังเชื่อมต่อกับ: <strong id="wifi-ssid-label" class="text-info fs-5"></strong></p>
+                    <div id="wifi-pwd-container" class="mb-3">
+                        <label for="wifi-password" class="form-label">Password (รหัสผ่าน):</label>
+                        <input type="password" class="form-control bg-dark text-light border-secondary" id="wifi-password" placeholder="Enter Wi-Fi Password">
+                    </div>
+                    <div id="wifi-connect-alert" class="alert alert-danger d-none mt-2" role="alert"></div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary" onclick="backToWifiList()">Back</button>
+                    <button type="button" class="btn btn-success fw-bold" id="btn-connect-wifi" onclick="executeConnectWifi()">
+                        <i class="fa-solid fa-plug"></i> Connect
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
     <script>
-        // 0. ฟังก์ชันอัปเดตสถานะระบบ (ทำงานอัตโนมัติ)
+        // ==========================================
+        // ระบบอัปเดตสถานะและแสกนเน็ตเวิร์ค
+        // ==========================================
         async function fetchSystemStats() {
             try {
                 const response = await fetch('/api/system_stats');
@@ -162,16 +217,13 @@
             }
         }
         
-        // สั่งรันครั้งแรกและตั้งเวลาดึงข้อมูลทุกๆ 3 วินาที
         fetchSystemStats();
         setInterval(fetchSystemStats, 3000);
 
-        // 1. ฟังก์ชันสแกนเร็ว (ดึงข้อมูล 1-254)
         async function startQuickScan() {
             const subnet = document.getElementById('subnet').value;
             if (!subnet) return alert("กรุณาระบุ Subnet ให้ถูกต้อง (เช่น 192.168.1.)");
             
-            // เปิดหน้าจอโหลด
             document.getElementById('loading-overlay').style.display = 'flex';
             const tbody = document.getElementById('results-tbody');
             
@@ -184,30 +236,23 @@
                 
                 const data = await response.json();
                 
-                // อัปเดตจำนวนอุปกรณ์
                 document.getElementById('device-count').innerText = `${data.results.length} Active Devices`;
                 document.getElementById('device-count').className = 'badge bg-success fs-6 p-2 shadow-sm';
                 
-                tbody.innerHTML = ''; // ล้างตารางเก่า
+                tbody.innerHTML = '';
                 
                 if (data.results.length === 0) {
                     tbody.innerHTML = `<tr><td colspan="6" class="text-center text-warning py-5 fw-bold"><i class="fa-solid fa-triangle-exclamation fa-2x mb-2"></i><br>ไม่พบอุปกรณ์ที่ออนไลน์ หรือถูกบล็อกการตอบสนอง</td></tr>`;
                     return;
                 }
 
-                // วนลูปวาดตาราง
                 data.results.forEach((device, index) => {
-                    
-                    // จัดการแสดงผลพอร์ต
                     let portsHtml = device.ports.map(p => `<span class="badge bg-secondary port-badge">${p}</span>`).join(' ');
                     if (!portsHtml) portsHtml = '<span class="text-muted small fst-italic">No open ports</span>';
 
-                    // ปุ่มเครื่องมือพื้นฐาน (Deep Scan)
                     let actionButtons = `<button onclick="startDeepScan('${device.ip}', this, 'ports-cell-${index}')" class="btn btn-sm btn-outline-warning w-100 mb-2 fw-bold"><i class="fa-solid fa-fire"></i> Deep Scan (65k)</button>`;
                     
-                    // สมองกล: ถ้าเจอกล้องวงจรปิด (พอร์ต RTSP/NVR) สร้างปุ่มดูภาพ
                     if (device.ports.includes(554) || device.ports.includes(37777) || device.ports.includes(34567) || device.badge_class === 'bg-camera') {
-                        // ส่งไปหน้า /camera
                         actionButtons += `<a href="/live?ip=${device.ip}" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm"><i class="fa-solid fa-play"></i> Live View</a>`;
                     }
                     if (device.ports.includes(6080)) {
@@ -219,7 +264,6 @@
                     if (device.ports.includes(7681)) {
                         actionButtons += `<a href="http://${device.ip}:7681" target="_blank" class="btn btn-sm btn-danger w-100 mb-2 fw-bold shadow-sm">SSH</a>`;
                     }
-                    // สมองกล: ถ้าเจอเว็บแอป (80, 443, 8080) สร้างปุ่มเปิดเว็บ
                     if (device.ports.includes(80) || device.ports.includes(443) || device.ports.includes(8080) || device.ports.includes(3000)) {
                         let proto = device.ports.includes(443) ? 'https' : 'http';
                         let mainPort = device.ports.find(p => [8080, 8000, 3000, 81,5000,9000].includes(p));
@@ -229,7 +273,6 @@
                         actionButtons += `<a href="${proto}://${device.ip}${p_append}" target="_blank" class="btn btn-sm btn-info w-100 fw-bold text-dark"><i class="fa-solid fa-globe"></i> Open Web</a>`;
                     }
 
-                    // เพิ่มลงในตาราง
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td class="ps-4 fw-bold text-info fs-5" style="font-family: monospace;">${device.ip}</td>
@@ -248,17 +291,14 @@
             } catch (error) {
                 alert("สแกนล้มเหลว: " + error.message);
             } finally {
-                // ปิดหน้าจอโหลด
                 document.getElementById('loading-overlay').style.display = 'none';
             }
         }
 
-        // 2. ฟังก์ชันสแกนแบบลึก (Deep Scan 65535 Ports) กดได้ทีละเครื่อง
         async function startDeepScan(ip, btnElement, cellId) {
             const cell = document.getElementById(cellId);
             const originalBtnHtml = btnElement.innerHTML;
             
-            // เปลี่ยนหน้าตาปุ่มและช่องสถานะ
             btnElement.innerHTML = `<span class="spinner-border spinner-border-sm" role="status"></span> Scanning...`;
             btnElement.disabled = true;
             cell.innerHTML = `<span class="badge bg-warning text-dark px-2 py-1"><i class="fa-solid fa-cog fa-spin"></i> Scanning 65k ports...</span>`;
@@ -285,6 +325,131 @@
                 cell.innerHTML = `<span class="text-danger fw-bold small"><i class="fa-solid fa-xmark"></i> Scan Failed</span>`;
                 btnElement.innerHTML = originalBtnHtml;
                 btnElement.disabled = false;
+            }
+        }
+
+        // ==========================================
+        // ระบบจัดการ Wi-Fi (เพิ่มใหม่)
+        // ==========================================
+        let currentSsid = '';
+        let wifiModalInstance = null;
+        let connectModalInstance = null;
+
+        function openWifiModal() {
+            if(!wifiModalInstance) wifiModalInstance = new bootstrap.Modal(document.getElementById('wifiModal'));
+            wifiModalInstance.show();
+            scanWifi();
+        }
+
+        async function scanWifi() {
+            const listDiv = document.getElementById('wifi-list');
+            listDiv.innerHTML = `
+                <div class="text-center py-5">
+                    <div class="spinner-border text-info mb-3" style="width: 3rem; height: 3rem;" role="status"></div>
+                    <h5 class="text-light">กำลังสแกนหา Wi-Fi รอบๆ บอร์ด...</h5>
+                </div>`;
+
+            try {
+                const res = await fetch('/api/wifi/scan');
+                const data = await res.json();
+                
+                if (data.status === 'ok') {
+                    if (data.networks.length === 0) {
+                        listDiv.innerHTML = '<div class="p-4 text-center text-warning fw-bold">ไม่พบสัญญาณ Wi-Fi ในบริเวณนี้</div>';
+                        return;
+                    }
+                    
+                    let html = '';
+                    data.networks.forEach(net => {
+                        let secIcon = (net.security && net.security !== '--') ? '<i class="fa-solid fa-lock text-warning" title="มีรหัสผ่าน"></i>' : '<i class="fa-solid fa-lock-open text-success" title="ไม่มีรหัสผ่าน"></i>';
+                        let signalColor = net.signal > 70 ? 'text-success' : (net.signal > 40 ? 'text-warning' : 'text-danger');
+                        
+                        html += `
+                        <div class="list-group-item bg-dark text-light border-secondary wifi-item d-flex justify-content-between align-items-center p-3" 
+                             onclick="prepareConnect('${net.ssid}', '${net.security}')">
+                            <div class="d-flex align-items-center">
+                                <i class="fa-solid fa-wifi fa-lg me-3 ${signalColor}"></i>
+                                <div>
+                                    <h5 class="mb-0 fw-bold">${net.ssid}</h5>
+                                    <small class="text-muted">ความแรงสัญญาณ: ${net.signal}% | ความปลอดภัย: ${net.security || 'None'}</small>
+                                </div>
+                            </div>
+                            <div>${secIcon}</div>
+                        </div>`;
+                    });
+                    listDiv.innerHTML = html;
+                } else {
+                    listDiv.innerHTML = `<div class="p-4 text-center text-danger fw-bold">เกิดข้อผิดพลาด: ${data.message}</div>`;
+                }
+            } catch (e) {
+                listDiv.innerHTML = `<div class="p-4 text-center text-danger fw-bold">ไม่สามารถเชื่อมต่อกับ API ได้: ${e.message}</div>`;
+            }
+        }
+
+        function prepareConnect(ssid, security) {
+            currentSsid = ssid;
+            document.getElementById('wifi-ssid-label').innerText = ssid;
+            document.getElementById('wifi-password').value = '';
+            document.getElementById('wifi-connect-alert').classList.add('d-none');
+            
+            // ถ้าไม่มี Security หรือเป็น '--' ให้ซ่อนช่องใส่รหัสผ่าน
+            if (!security || security === '--') {
+                document.getElementById('wifi-pwd-container').style.display = 'none';
+            } else {
+                document.getElementById('wifi-pwd-container').style.display = 'block';
+            }
+            
+            wifiModalInstance.hide();
+            if(!connectModalInstance) connectModalInstance = new bootstrap.Modal(document.getElementById('wifiConnectModal'));
+            connectModalInstance.show();
+        }
+
+        function backToWifiList() {
+            connectModalInstance.hide();
+            wifiModalInstance.show();
+        }
+
+        async function executeConnectWifi() {
+            const pwd = document.getElementById('wifi-password').value;
+            const btn = document.getElementById('btn-connect-wifi');
+            const alertBox = document.getElementById('wifi-connect-alert');
+            
+            const isPwdRequired = document.getElementById('wifi-pwd-container').style.display !== 'none';
+            if (isPwdRequired && !pwd) {
+                alertBox.innerText = "กรุณากรอกรหัสผ่าน Wi-Fi";
+                alertBox.classList.remove('d-none');
+                return;
+            }
+
+            alertBox.classList.add('d-none');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Connecting...';
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/wifi/connect', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ssid: currentSsid, password: pwd})
+                });
+                
+                const data = await res.json();
+                
+                if (data.status === 'ok') {
+                    connectModalInstance.hide();
+                    alert(`เชื่อมต่อ ${currentSsid} สำเร็จเรียบร้อยแล้ว!\nระบบอาจจะต้องรีเฟรชหน้าเว็บหรือเปลี่ยน IP หากได้รับการแจก IP ใหม่จากเราเตอร์`);
+                    // ปล่อยให้หน้าต่างโหลดใหม่เผื่อว่า IP เปลี่ยน
+                    setTimeout(() => { window.location.reload(); }, 2000);
+                } else {
+                    alertBox.innerText = `เชื่อมต่อไม่สำเร็จ: ${data.message}`;
+                    alertBox.classList.remove('d-none');
+                }
+            } catch (e) {
+                alertBox.innerText = `เชื่อมต่อล้มเหลว (Timeout/Error): ${e.message}`;
+                alertBox.classList.remove('d-none');
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
             }
         }
     </script>
