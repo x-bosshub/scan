@@ -19,7 +19,7 @@ sudo apt-get install -y i2c-tools cmake python3-opencv
 pip install Flask psutil requests smbus2 gpiozero adafruit-circuitpython-servokit
 
 # 4. ติดตั้งไลบรารี AI (การติดตั้ง dlib และ face_recognition อาจใช้เวลาสักพัก)
-pip install numpy face_recognition ultralytics
+pip install numpy face_recognition
 
 # 5. ออกจาก venv และรีสตาร์ท Service
 deactivate
