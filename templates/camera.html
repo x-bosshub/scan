@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Raspberry Pi Hardware Camera</title>
+    <title>Raspberry Pi Hardware Camera & Face Recognition</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -11,8 +11,9 @@
         body { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         .navbar { background-color: #1a1d20; border-bottom: 2px solid #0d6efd; }
         .card { background-color: #1e2125; border: 1px solid #333; }
-        .video-box { background: #000; border-radius: 8px; border: 2px solid #0d6efd; overflow: hidden; width: 100%; max-width: 800px; margin: 0 auto; }
+        .video-box { background: #000; border-radius: 8px; border: 2px solid #0d6efd; overflow: hidden; width: 100%; max-width: 100%; margin: 0 auto; }
         .video-box img { width: 100%; height: auto; display: block; }
+        .list-group-item-dark { background-color: #212529; border-color: #343a40; color: #e0e0e0; }
     </style>
 </head>
 <body>
@@ -26,19 +27,175 @@
         </div>
     </nav>
 
-    <div class="container text-center">
-        <div class="card p-4 shadow-sm">
-            <h4 class="text-start mb-3 fw-bold text-info"><i class="fa-solid fa-bolt text-warning"></i> สัญญาณภาพสดจากบอร์ด (On-Board Stream)</h4>
-            
-            <div class="video-box shadow-lg mb-3">
-                <img src="/video_pi" alt="ไม่สามารถเปิดกล้องฮาร์ดแวร์ได้ (กรุณาเช็คการเชื่อมต่อสาย CSI / USB)">
+    <div class="container-fluid px-4">
+        <div class="row">
+            <div class="col-lg-8 mb-4">
+                <div class="card p-4 shadow-sm h-100">
+                    <h4 class="text-start mb-3 fw-bold text-info"><i class="fa-solid fa-bolt text-warning"></i> สัญญาณภาพสดจากบอร์ด (On-Board Stream)</h4>
+                    
+                    <div class="video-box shadow-lg mb-3">
+                        <img width="100%" id="videoStream" src="/video_pi" crossorigin="anonymous" alt="ไม่สามารถเปิดกล้องฮาร์ดแวร์ได้ (กรุณาเช็คการเชื่อมต่อสาย CSI / USB)">
+                    </div>
+                    
+                    <p class="text-muted small mb-0 text-center">
+                        สตรีมมิ่งเซสชันตรงจากฮาร์ดแวร์ Raspberry Pi ผ่านช่องอุปกรณ์หลัก `/dev/video0`
+                    </p>
+                </div>
             </div>
-            
-            <p class="text-muted small mb-0">
-                สตรีมมิ่งเซสชันตรงจากฮาร์ดแวร์ Raspberry Pi ผ่านช่องอุปกรณ์หลัก `/dev/video0` 
-            </p>
+
+            <div class="col-lg-4 mb-4">
+                <div class="card p-4 shadow-sm mb-4">
+                    <h5 class="fw-bold text-success mb-3"><i class="fa-solid fa-user-plus"></i> ลงทะเบียนใบหน้าใหม่</h5>
+                    <p class="text-muted small">ระบบจะทำการจับภาพจากกล้องปัจจุบันเพื่อลงทะเบียนเข้าสู่ฐานข้อมูล</p>
+                    
+                    <div class="mb-3">
+                        <label for="personName" class="form-label">ชื่อบุคคล <span class="text-danger">*</span></label>
+                        <input type="text" id="personName" class="form-control" placeholder="ภาษาอังกฤษหรือไทยก็ได้" required>
+                        <div class="form-text text-secondary">กรุณาระบุชื่ออย่างน้อย 4 ตัวอักษร</div>
+                    </div>
+                    
+                    <button id="captureBtn" class="btn btn-primary w-100 fw-bold" onclick="registerFace()">
+                        <i class="fa-solid fa-camera"></i> แคปเจอร์ภาพ & บันทึกใบหน้า
+                    </button>
+                    
+                    <div id="statusAlert" class="alert mt-3 d-none text-center" role="alert"></div>
+                </div>
+
+                <div class="card p-4 shadow-sm">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="fw-bold text-info mb-0"><i class="fa-solid fa-users"></i> ฐานข้อมูลใบหน้า</h5>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="loadFaces()"><i class="fa-solid fa-rotate-right"></i> รีเฟรช</button>
+                    </div>
+                    
+                    <div id="faceList" class="list-group" style="max-height: 250px; overflow-y: auto;">
+                        <div class="text-center text-muted py-3">กำลังโหลดข้อมูล...</div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
+    <canvas id="captureCanvas" style="display: none;"></canvas>
+
+    <script>
+        // ฟังก์ชันดึงภาพจาก Stream และส่งไป API
+        function registerFace() {
+            const nameInput = document.getElementById('personName').value.trim();
+            const alertBox = document.getElementById('statusAlert');
+            const btn = document.getElementById('captureBtn');
+
+            // ตรวจสอบความยาวของชื่อตามกฎระบบ (ต้องมีอย่างน้อย 4 ตัวอักษร)
+            if (nameInput.length < 4) {
+                alertBox.className = 'alert alert-warning mt-3';
+                alertBox.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> ข้อมูลไม่ถูกต้อง: ชื่อต้องมีความยาวไม่ต่ำกว่า 4 ตัวอักษร';
+                alertBox.classList.remove('d-none');
+                return;
+            }
+
+            // เปลี่ยนสถานะปุ่ม
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังประมวลผล...';
+            alertBox.classList.add('d-none');
+
+            const videoImg = document.getElementById('videoStream');
+            const canvas = document.getElementById('captureCanvas');
+            const ctx = canvas.getContext('2d');
+
+            // ตรวจสอบว่าภาพโหลดขึ้นมาหรือยัง
+            if (!videoImg.complete || videoImg.naturalWidth === 0) {
+                alertBox.className = 'alert alert-danger mt-3';
+                alertBox.innerHTML = '<i class="fa-solid fa-xmark"></i> ไม่สามารถดึงภาพจากกล้องได้';
+                alertBox.classList.remove('d-none');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-camera"></i> แคปเจอร์ภาพ & บันทึกใบหน้า';
+                return;
+            }
+
+            // กำหนดขนาด Canvas ให้ตรงกับภาพต้นฉบับ
+            canvas.width = videoImg.naturalWidth;
+            canvas.height = videoImg.naturalHeight;
+            
+            // วาดภาพปัจจุบันลง Canvas
+            ctx.drawImage(videoImg, 0, 0, canvas.width, canvas.height);
+
+            // แปลงภาพใน Canvas เป็น Blob (ไฟล์ JPEG) เพื่อส่งผ่าน API
+            canvas.toBlob(function(blob) {
+                const formData = new FormData();
+                formData.append('image', blob, 'capture.jpg');
+                formData.append('name', nameInput);
+
+                fetch('/api/face/register', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'ok') {
+                        alertBox.className = 'alert alert-success mt-3';
+                        alertBox.innerHTML = `<i class="fa-solid fa-check"></i> ${data.message}`;
+                        document.getElementById('personName').value = '';
+                        loadFaces(); // โหลดรายชื่อใหม่ทันที
+                    } else {
+                        alertBox.className = 'alert alert-danger mt-3';
+                        alertBox.innerHTML = `<i class="fa-solid fa-xmark"></i> ${data.message}`;
+                    }
+                    alertBox.classList.remove('d-none');
+                })
+                .catch(error => {
+                    alertBox.className = 'alert alert-danger mt-3';
+                    alertBox.innerHTML = '<i class="fa-solid fa-link-slash"></i> เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์';
+                    alertBox.classList.remove('d-none');
+                })
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-camera"></i> แคปเจอร์ภาพ & บันทึกใบหน้า';
+                });
+            }, 'image/jpeg', 0.9);
+        }
+
+        // ฟังก์ชันดึงรายชื่อที่บันทึกไว้มาแสดง
+        function loadFaces() {
+            const list = document.getElementById('faceList');
+            
+            fetch('/api/face/list')
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    list.innerHTML = '';
+                    if (data.faces.length === 0) {
+                        list.innerHTML = '<div class="text-center text-muted py-3">ยังไม่มีข้อมูลใบหน้าในระบบ</div>';
+                        return;
+                    }
+                    
+                    // เรียงข้อมูลล่าสุดขึ้นก่อน
+                    const faces = data.faces.reverse();
+                    
+                    faces.forEach(f => {
+                        // แปลงเวลา Timestamp เป็นรูปแบบที่อ่านง่าย
+                        const date = new Date(f.timestamp * 1000);
+                        const timeString = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')} น.`;
+                        
+                        list.innerHTML += `
+                            <div class="list-group-item list-group-item-dark d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-0 fw-bold">${f.name}</h6>
+                                    <small class="text-muted">บันทึกเมื่อ: ${timeString}</small>
+                                </div>
+                                <span class="badge bg-success rounded-pill"><i class="fa-solid fa-check"></i></span>
+                            </div>
+                        `;
+                    });
+                }
+            })
+            .catch(error => {
+                list.innerHTML = '<div class="text-center text-danger py-3">ไม่สามารถดึงข้อมูลได้</div>';
+            });
+        }
+
+        // โหลดข้อมูลรายชื่อทันทีที่เปิดหน้าเว็บ
+        window.onload = function() {
+            loadFaces();
+        };
+    </script>
 </body>
 </html>
