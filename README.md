@@ -5,6 +5,26 @@ cd scan
 chmod +x install.sh setup_service.sh
 ./install.sh
 ./setup_service.sh
+
+
+
+# 1. เข้าสู่ Virtual Environment
+source venv/bin/activate
+
+# 2. ติดตั้งเครื่องมือพื้นฐานและไลบรารีจัดการระบบ
+sudo apt-get update
+sudo apt-get install -y i2c-tools cmake python3-opencv
+
+# 3. ติดตั้งไลบรารี Python ทั้งหมดที่ระบบ Kiosk นี้ต้องใช้
+pip install Flask psutil requests smbus2 gpiozero adafruit-circuitpython-servokit
+
+# 4. ติดตั้งไลบรารี AI (การติดตั้ง dlib และ face_recognition อาจใช้เวลาสักพัก)
+pip install numpy face_recognition ultralytics
+
+# 5. ออกจาก venv และรีสตาร์ท Service
+deactivate
+sudo systemctl restart iot-scanner.service
+
 ```
 # สามารถเข้าใช้งาน
 ```
