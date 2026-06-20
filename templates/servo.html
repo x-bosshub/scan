@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dual Servo Controller (GPIO & I2C)</title>
+    <title>Dual Servo Controller (GPIO, I2C & Raspbot)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -56,6 +56,7 @@
                             <select id="conn-type-1" class="form-select bg-dark text-white border-secondary mb-3" onchange="updatePlaceholder('1')">
                                 <option value="gpio">Direct GPIO (ขาบอร์ด Pi)</option>
                                 <option value="pca9685">PCA9685 (บอร์ด 16 ช่อง I2C)</option>
+                                <option value="raspbot">Raspbot Board (ผ่าน I2C)</option>
                             </select>
                             
                             <label class="form-label text-light fw-bold">2. กำหนดหมายเลขพอร์ต:</label>
@@ -105,6 +106,7 @@
                             <select id="conn-type-2" class="form-select bg-dark text-white border-secondary mb-3" onchange="updatePlaceholder('2')">
                                 <option value="gpio">Direct GPIO (ขาบอร์ด Pi)</option>
                                 <option value="pca9685">PCA9685 (บอร์ด 16 ช่อง I2C)</option>
+                                <option value="raspbot">Raspbot Board (ผ่าน I2C)</option>
                             </select>
                             
                             <label class="form-label text-light fw-bold">2. กำหนดหมายเลขพอร์ต:</label>
@@ -152,6 +154,9 @@
             if (type === 'pca9685') {
                 input.placeholder = "ระบุช่อง Channel (0 - 15)";
                 input.max = 15;
+            } else if (type === 'raspbot') {
+                input.placeholder = "ระบุ ID ของ Servo (เช่น 1 หรือ 2)";
+                input.max = 4;
             } else {
                 input.placeholder = "ระบุขา GPIO (เช่น 12)";
                 input.max = 40;
@@ -192,7 +197,7 @@
             const setupBtn = document.getElementById(`setup-btn-${servoId}`);
 
             if (!pin) {
-                statusDiv.innerHTML = `<span class="text-danger"><i class="fa-solid fa-triangle-exclamation"></i> กรุณาระบุหมายเลขพอร์ต</span>`;
+                statusDiv.innerHTML = `<span class="text-danger"><i class="fa-solid fa-triangle-exclamation"></i> กรุณาระบุหมายเลขพอร์ตหรือ ID</span>`;
                 return;
             }
 
