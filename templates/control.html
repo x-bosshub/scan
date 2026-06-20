@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Master Control Room</title>
+    <title>Master Control Room & Face Recognition</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -19,8 +19,14 @@
         }
         .video-container img { width: 100%; height: 100%; object-fit: contain; }
 
-        .ptz-btn { height: 70px; font-size: 1.5rem; }
-        .angle-badge { font-family: monospace; font-size: 1.1rem; }
+        .ptz-btn { height: 60px; font-size: 1.2rem; }
+        .angle-badge { font-family: monospace; font-size: 1rem; }
+        .list-group-item-dark { background-color: #212529; border-color: #343a40; color: #e0e0e0; }
+        
+        /* สกอร์บาร์สำหรับแผงควบคุม */
+        .control-panel::-webkit-scrollbar { width: 8px; }
+        .control-panel::-webkit-scrollbar-track { background: #111417; }
+        .control-panel::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
     </style>
 </head>
 <body>
@@ -29,6 +35,9 @@
         <div class="container-fluid px-4">
             <a class="navbar-brand text-info fw-bold" href="#"><i class="fa-solid fa-gamepad"></i> MASTER CONTROL ROOM</a>
             <div class="d-flex align-items-center">
+                <button class="btn btn-outline-primary btn-sm fw-bold me-3" onclick="openTelegramModal()">
+                    <i class="fa-brands fa-telegram"></i> Telegram Config
+                </button>
                 <a href="/" class="btn btn-outline-light btn-sm fw-bold"><i class="fa-solid fa-house"></i> Exit</a>
             </div>
         </div>
@@ -37,41 +46,42 @@
     <div class="container-fluid p-0">
         <div class="row g-0">
             
+            <!-- ส่วนแสดงภาพจากกล้อง -->
             <div class="col-lg-8 col-xl-9">
                 <div class="video-container">
-                    <img id="stream-img" src="/video_pi" alt="ไม่มีสัญญาณกล้อง (Pi Camera)">
+                    <img id="stream-img" src="/video_pi" crossorigin="anonymous" alt="ไม่มีสัญญาณกล้อง (Pi Camera)">
                     <div class="position-absolute top-0 start-0 m-3 p-2 bg-dark rounded text-info fw-bold" style="opacity: 0.7;">
-                        <i class="fa-solid fa-circle text-danger blink"></i> LIVE: Pi Camera
+                        <i class="fa-solid fa-circle text-danger blink"></i> LIVE: Pi Camera + AI Detect
                     </div>
                 </div>
             </div>
 
+            <!-- แผงควบคุมด้านขวา -->
             <div class="col-lg-4 col-xl-3 control-panel p-4 shadow-lg">
-                <h4 class="fw-bold mb-4 border-bottom border-secondary pb-2 text-warning">
+                
+                <!-- ส่วนที่ 1: ควบคุมมอเตอร์ -->
+                <h5 class="fw-bold mb-3 border-bottom border-secondary pb-2 text-warning">
                     <i class="fa-solid fa-robot"></i> KIOSK CONTROLS
-                </h4>
+                </h5>
 
-                <div class="mb-4 bg-dark rounded p-3 border border-secondary shadow-sm">
-                    <div class="d-flex justify-content-between mb-3 align-items-center">
-                        <span class="fw-bold text-light"><i class="fa-solid fa-arrows-left-right text-info"></i> แกน X (ซ้าย-ขวา)</span>
+                <div class="mb-3 bg-dark rounded p-2 border border-secondary shadow-sm">
+                    <div class="d-flex justify-content-between mb-2 align-items-center">
+                        <span class="fw-bold text-light small"><i class="fa-solid fa-arrows-left-right text-info"></i> แกน X</span>
                         <span id="angle-txt-1" class="badge bg-secondary angle-badge">OFFLINE</span>
                     </div>
                     <div class="d-flex justify-content-between align-items-center">
-                        <span class="fw-bold text-light"><i class="fa-solid fa-arrows-up-down text-success"></i> แกน Y (ขึ้น-ลง)</span>
+                        <span class="fw-bold text-light small"><i class="fa-solid fa-arrows-up-down text-success"></i> แกน Y</span>
                         <span id="angle-txt-2" class="badge bg-secondary angle-badge">OFFLINE</span>
-                    </div>
-                    <div class="text-center mt-3">
-                        <small id="save-status" class="text-muted"><i class="fa-solid fa-save"></i> โหลดการตั้งค่าฮาร์ดแวร์อัตโนมัติ</small>
                     </div>
                 </div>
 
-                <div class="text-center mb-4">
+                <div class="text-center mb-3">
                     <div class="row g-2 mb-2 justify-content-center">
                         <div class="col-4"><button onclick="movePTZ('2', 'up')" id="ctrl-up" class="btn btn-outline-warning w-100 ptz-btn shadow" disabled><i class="fa-solid fa-chevron-up"></i></button></div>
                     </div>
                     <div class="row g-2 mb-2 justify-content-center">
                         <div class="col-4"><button onclick="movePTZ('1', 'left')" id="ctrl-left" class="btn btn-outline-warning w-100 ptz-btn shadow" disabled><i class="fa-solid fa-chevron-left"></i></button></div>
-                        <div class="col-4"><button onclick="movePTZ('1', 'home')" id="ctrl-home" class="btn btn-warning w-100 ptz-btn shadow fw-bold text-dark" style="font-size: 1rem;" disabled>HOME</button></div>
+                        <div class="col-4"><button onclick="movePTZ('1', 'home')" id="ctrl-home" class="btn btn-warning w-100 ptz-btn shadow fw-bold text-dark" style="font-size: 0.9rem;" disabled>HOME</button></div>
                         <div class="col-4"><button onclick="movePTZ('1', 'right')" id="ctrl-right" class="btn btn-outline-warning w-100 ptz-btn shadow" disabled><i class="fa-solid fa-chevron-right"></i></button></div>
                     </div>
                     <div class="row g-2 justify-content-center">
@@ -79,17 +89,100 @@
                     </div>
                 </div>
 
-                <div id="ptz-alert-status" class="alert alert-danger text-center fw-bold p-2 small shadow-sm">
-                    มอเตอร์ยังไม่ถูกบันทึกค่า (กรุณาไปที่เมนู Servo Setup)
+                <div id="ptz-alert-status" class="alert alert-danger text-center fw-bold p-1 small shadow-sm mb-4">
+                    มอเตอร์ Offline
                 </div>
 
-                <a href="/servo" target="_blank" class="btn btn-outline-secondary w-100 mt-2"><i class="fa-solid fa-cog"></i> ปรับแต่งขา GPIO / PCA9685</a>
+                <!-- ส่วนที่ 2: ลงทะเบียนใบหน้า -->
+                <h5 class="fw-bold mb-3 border-bottom border-secondary pb-2 text-success mt-4">
+                    <i class="fa-solid fa-user-plus"></i> REGISTER FACE
+                </h5>
+                
+                <div class="mb-3">
+                    <input type="text" id="personName" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="ชื่อบุคคล (อย่างน้อย 4 ตัวอักษร)" required>
+                </div>
+                
+                <button id="captureBtn" class="btn btn-success btn-sm w-100 fw-bold shadow-sm mb-2" onclick="registerFace()">
+                    <i class="fa-solid fa-camera"></i> แคปเจอร์ & บันทึกใบหน้า
+                </button>
+                
+                <div id="statusAlert" class="alert d-none text-center p-1 small mb-4" role="alert"></div>
+
+                <!-- ส่วนที่ 3: ฐานข้อมูลใบหน้า -->
+                <div class="d-flex justify-content-between align-items-center mb-2 mt-2">
+                    <h6 class="fw-bold text-info mb-0"><i class="fa-solid fa-database"></i> ฐานข้อมูลใบหน้า</h6>
+                    <button class="btn btn-sm btn-outline-secondary py-0" onclick="loadFaces()"><i class="fa-solid fa-rotate-right"></i></button>
+                </div>
+                
+                <div id="faceList" class="list-group list-group-flush border border-secondary rounded" style="max-height: 200px; overflow-y: auto;">
+                    <div class="text-center text-muted py-2 small">กำลังโหลดข้อมูล...</div>
+                </div>
 
             </div>
         </div>
     </div>
 
+    <!-- Modal ตั้งค่า Telegram -->
+    <div class="modal fade" id="telegramModal" tabindex="-1" aria-labelledby="telegramModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-dark text-light border-primary">
+                <div class="modal-header border-secondary bg-primary bg-opacity-10">
+                    <h5 class="modal-title fw-bold text-primary" id="telegramModalLabel"><i class="fa-brands fa-telegram"></i> Telegram Notification Setup</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="form-check form-switch mb-4">
+                        <input class="form-check-input form-check-input-lg" type="checkbox" id="tgEnable">
+                        <label class="form-check-label fw-bold text-success ms-2" for="tgEnable">เปิดใช้งานการส่งแจ้งเตือนเข้า Telegram</label>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-info">Bot Token</label>
+                        <input type="text" id="tgToken" class="form-control bg-dark text-light border-secondary" placeholder="รับจาก @BotFather">
+                        <div class="form-text text-secondary">ต้องมีความยาวอย่างน้อย 4 ตัวอักษร</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-info">Chat ID</label>
+                        <div class="input-group">
+                            <input type="text" id="tgChatId" class="form-control bg-dark text-light border-secondary" placeholder="พิมพ์เอง หรือกดปุ่มด้านขวาเพื่อค้นหา">
+                            <button class="btn btn-outline-info" type="button" id="btnFetchChats" onclick="fetchTelegramChats()">
+                                <i class="fa-solid fa-cloud-arrow-down"></i> ดึง Chat
+                            </button>
+                        </div>
+                        
+                        <!-- Dropdown สำหรับเลือกแชทที่ดึงมา (ซ่อนไว้เป็นค่าเริ่มต้น) -->
+                        <select id="tgChatSelect" class="form-select bg-dark text-warning border-secondary mt-2 d-none" onchange="selectChatId()">
+                            <option value="">-- เลือกแชทที่ต้องการ --</option>
+                        </select>
+                        <div class="form-text text-secondary">หากต้องการดึงข้อมูลแชทอัตโนมัติ ให้กรอก Bot Token แล้วทัก /start หาบอทให้เรียบร้อยก่อน</div>
+                    </div>
+
+                    <div class="mb-3 mt-4">
+                        <label class="form-label fw-bold text-warning">Cooldown Time (วินาที)</label>
+                        <input type="number" id="tgCooldown" class="form-control bg-dark text-light border-secondary" placeholder="เช่น 30" min="5" max="300">
+                        <div class="form-text text-secondary">ระยะเวลาหน่วงก่อนส่งแจ้งเตือนครั้งต่อไป (ป้องกันข้อความสแปม)</div>
+                    </div>
+
+                    <div id="tgAlert" class="alert d-none mt-3 p-2 small text-center fw-bold" role="alert"></div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+                    <button type="button" class="btn btn-primary fw-bold" onclick="saveTelegramConfig()"><i class="fa-solid fa-save"></i> บันทึกการตั้งค่า</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Canvas ที่ซ่อนไว้สำหรับดึงภาพจาก Video Stream -->
+    <canvas id="captureCanvas" style="display: none;"></canvas>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
     <script>
+        // ==========================================
+        // ส่วนควบคุม Servo
+        // ==========================================
         async function updateServosStatus() {
             try {
                 const response = await fetch('/api/get_servos_status');
@@ -113,9 +206,8 @@
 
                 if (data.servo1_connected || data.servo2_connected) {
                     const alertBox = document.getElementById('ptz-alert-status');
-                    alertBox.className = 'alert alert-success text-center fw-bold p-2 small shadow-sm';
+                    alertBox.className = 'alert alert-success text-center fw-bold p-1 small shadow-sm mb-4';
                     alertBox.innerHTML = '<i class="fa-solid fa-circle-check"></i> มอเตอร์พร้อมใช้งาน';
-                    document.getElementById('save-status').innerHTML = `<i class="fa-solid fa-check text-success"></i> ระบบดึงค่า Save มาใช้งานแล้ว`;
                 }
             } catch (error) {
                 console.log("Error status connection failed");
@@ -133,7 +225,6 @@
                 if (data.status === "ok") {
                     document.getElementById(`angle-txt-${servoId}`).innerText = data.angle + '°';
                     if (direction === 'home') {
-                        // ถ้ากด Home ให้สั่งให้แกน Y กลับไป 90 ด้วย
                         fetch('/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ servo_id: '2', direction: 'home' }) }).then(() => updateServosStatus());
                     }
                 }
@@ -142,9 +233,260 @@
             }
         }
 
-        // เช็คสถานะมอเตอร์ซ้ำทุกๆ 5 วินาที เผื่อมีการไปปรับตั้งค่าในหน้าต่างอื่น
-        updateServosStatus();
-        setInterval(updateServosStatus, 5000);
+        // ==========================================
+        // ส่วนจัดการ Face Recognition
+        // ==========================================
+        function registerFace() {
+            const nameInput = document.getElementById('personName').value.trim();
+            const alertBox = document.getElementById('statusAlert');
+            const btn = document.getElementById('captureBtn');
+
+            if (nameInput.length < 4) {
+                alertBox.className = 'alert alert-warning mt-2 p-1 small';
+                alertBox.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> ข้อมูลไม่ถูกต้อง: ชื่อต้องมีความยาวไม่ต่ำกว่า 4 ตัวอักษร';
+                alertBox.classList.remove('d-none');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังประมวลผล...';
+            alertBox.classList.add('d-none');
+
+            const videoImg = document.getElementById('stream-img');
+            const canvas = document.getElementById('captureCanvas');
+            const ctx = canvas.getContext('2d');
+
+            if (!videoImg.complete || videoImg.naturalWidth === 0) {
+                alertBox.className = 'alert alert-danger mt-2 p-1 small';
+                alertBox.innerHTML = '<i class="fa-solid fa-xmark"></i> ไม่สามารถดึงภาพจากกล้องได้';
+                alertBox.classList.remove('d-none');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-camera"></i> แคปเจอร์ & บันทึกใบหน้า';
+                return;
+            }
+
+            canvas.width = videoImg.naturalWidth;
+            canvas.height = videoImg.naturalHeight;
+            ctx.drawImage(videoImg, 0, 0, canvas.width, canvas.height);
+
+            canvas.toBlob(function(blob) {
+                const formData = new FormData();
+                formData.append('image', blob, 'capture.jpg');
+                formData.append('name', nameInput);
+
+                fetch('/api/face/register', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'ok') {
+                        alertBox.className = 'alert alert-success mt-2 p-1 small';
+                        alertBox.innerHTML = `<i class="fa-solid fa-check"></i> ${data.message}`;
+                        document.getElementById('personName').value = '';
+                        loadFaces(); 
+                    } else {
+                        alertBox.className = 'alert alert-danger mt-2 p-1 small';
+                        alertBox.innerHTML = `<i class="fa-solid fa-xmark"></i> ${data.message}`;
+                    }
+                    alertBox.classList.remove('d-none');
+                })
+                .catch(error => {
+                    alertBox.className = 'alert alert-danger mt-2 p-1 small';
+                    alertBox.innerHTML = '<i class="fa-solid fa-link-slash"></i> เชื่อมต่อล้มเหลว';
+                    alertBox.classList.remove('d-none');
+                })
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-camera"></i> แคปเจอร์ & บันทึกใบหน้า';
+                });
+            }, 'image/jpeg', 0.9);
+        }
+
+        function loadFaces() {
+            const list = document.getElementById('faceList');
+            
+            fetch('/api/face/list')
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    list.innerHTML = '';
+                    if (data.faces.length === 0) {
+                        list.innerHTML = '<div class="text-center text-muted py-2 small">ยังไม่มีข้อมูลในระบบ</div>';
+                        return;
+                    }
+                    
+                    const faces = data.faces.reverse();
+                    
+                    faces.forEach(f => {
+                        const date = new Date(f.timestamp * 1000);
+                        const timeString = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')} น.`;
+                        
+                        list.innerHTML += `
+                            <div class="list-group-item list-group-item-dark d-flex justify-content-between align-items-center p-2">
+                                <div>
+                                    <div class="fw-bold small text-light">${f.name}</div>
+                                    <div class="text-muted" style="font-size: 0.7rem;">บันทึกเมื่อ: ${timeString}</div>
+                                </div>
+                                <span class="badge bg-success rounded-pill" style="font-size: 0.6rem;"><i class="fa-solid fa-check"></i></span>
+                            </div>
+                        `;
+                    });
+                }
+            })
+            .catch(error => {
+                list.innerHTML = '<div class="text-center text-danger py-2 small">ไม่สามารถดึงข้อมูลได้</div>';
+            });
+        }
+
+        // ==========================================
+        // ส่วนตั้งค่า Telegram Notification
+        // ==========================================
+        let tgModal;
+
+        function openTelegramModal() {
+            if (!tgModal) tgModal = new bootstrap.Modal(document.getElementById('telegramModal'));
+            
+            fetch('/api/telegram/status')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('tgEnable').checked = data.enabled;
+                    document.getElementById('tgToken').value = data.bot_token;
+                    document.getElementById('tgChatId').value = data.chat_id;
+                    document.getElementById('tgCooldown').value = data.cooldown;
+                    document.getElementById('tgAlert').classList.add('d-none');
+                    document.getElementById('tgChatSelect').classList.add('d-none');
+                    tgModal.show();
+                })
+                .catch(err => console.error("Error fetching Telegram config:", err));
+        }
+
+        // ฟังก์ชันดึงประวัติแชทจาก API อัตโนมัติ
+        function fetchTelegramChats() {
+            const token = document.getElementById('tgToken').value.trim();
+            const alertBox = document.getElementById('tgAlert');
+            const btnFetch = document.getElementById('btnFetchChats');
+            const selectDropdown = document.getElementById('tgChatSelect');
+
+            if (token.length < 10) {
+                alertBox.className = "alert alert-warning mt-3 p-2 small text-center fw-bold";
+                alertBox.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> กรุณากรอก Bot Token ให้ครบถ้วนก่อนดึงข้อมูลแชท';
+                alertBox.classList.remove('d-none');
+                return;
+            }
+
+            alertBox.classList.add('d-none');
+            const oldHtml = btnFetch.innerHTML;
+            btnFetch.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> ดึงข้อมูล...';
+            btnFetch.disabled = true;
+
+            fetch('/api/telegram/get_chats', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bot_token: token })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    // ล้างข้อมูลเดิมและใส่ข้อมูลแชทใหม่เข้าไป
+                    selectDropdown.innerHTML = '<option value="">-- พบแชท กรุณาเลือก --</option>';
+                    data.chats.forEach(chat => {
+                        const option = document.createElement('option');
+                        option.value = chat.id;
+                        option.textContent = chat.name + ' (ID: ' + chat.id + ')';
+                        selectDropdown.appendChild(option);
+                    });
+                    
+                    selectDropdown.classList.remove('d-none');
+                    alertBox.className = "alert alert-success mt-3 p-2 small text-center fw-bold";
+                    alertBox.innerHTML = `<i class="fa-solid fa-check"></i> ดึงรายชื่อแชทสำเร็จ! กรุณาเลือกจากกล่องด้านบน`;
+                    alertBox.classList.remove('d-none');
+                } else {
+                    alertBox.className = "alert alert-danger mt-3 p-2 small text-center fw-bold";
+                    alertBox.innerHTML = `<i class="fa-solid fa-xmark"></i> ${data.message}`;
+                    alertBox.classList.remove('d-none');
+                    selectDropdown.classList.add('d-none');
+                }
+            })
+            .catch(err => {
+                alertBox.className = "alert alert-danger mt-3 p-2 small text-center fw-bold";
+                alertBox.innerHTML = '<i class="fa-solid fa-wifi"></i> เชื่อมต่อกับเซิร์ฟเวอร์ล้มเหลว';
+                alertBox.classList.remove('d-none');
+            })
+            .finally(() => {
+                btnFetch.innerHTML = oldHtml;
+                btnFetch.disabled = false;
+            });
+        }
+
+        // เมื่อผู้ใช้กดเลือกแชทจาก Dropdown ให้นำ ID ไปใส่ในช่อง Input อัตโนมัติ
+        function selectChatId() {
+            const selectDropdown = document.getElementById('tgChatSelect');
+            if (selectDropdown.value) {
+                document.getElementById('tgChatId').value = selectDropdown.value;
+            }
+        }
+
+        function saveTelegramConfig() {
+            const enabled = document.getElementById('tgEnable').checked;
+            const token = document.getElementById('tgToken').value.trim();
+            const chatId = document.getElementById('tgChatId').value.trim();
+            let cooldown = parseInt(document.getElementById('tgCooldown').value) || 30;
+            const alertBox = document.getElementById('tgAlert');
+
+            if (enabled) {
+                if (token.length < 4 || chatId.length < 4) {
+                    alertBox.className = "alert alert-warning mt-3 p-2 small text-center fw-bold";
+                    alertBox.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> ข้อมูล Bot Token และ Chat ID ต้องมีความยาวอย่างน้อย 4 ตัวอักษร';
+                    alertBox.classList.remove('d-none');
+                    return;
+                }
+            }
+
+            if (cooldown < 5) cooldown = 5;
+
+            alertBox.classList.add('d-none');
+
+            const payload = {
+                bot_token: token,
+                chat_id: chatId,
+                enabled: enabled,
+                cooldown: cooldown
+            };
+
+            fetch('/api/telegram/setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    alertBox.className = "alert alert-success mt-3 p-2 small text-center fw-bold";
+                    alertBox.innerHTML = `<i class="fa-solid fa-check"></i> ${data.message}`;
+                    alertBox.classList.remove('d-none');
+                    setTimeout(() => tgModal.hide(), 1500);
+                } else {
+                    alertBox.className = "alert alert-danger mt-3 p-2 small text-center fw-bold";
+                    alertBox.innerHTML = `<i class="fa-solid fa-xmark"></i> ${data.message}`;
+                    alertBox.classList.remove('d-none');
+                }
+            })
+            .catch(err => {
+                alertBox.className = "alert alert-danger mt-3 p-2 small text-center fw-bold";
+                alertBox.innerHTML = '<i class="fa-solid fa-wifi"></i> เชื่อมต่อกับเซิร์ฟเวอร์ล้มเหลว';
+                alertBox.classList.remove('d-none');
+            });
+        }
+
+        // ==========================================
+        // การทำงานเมื่อโหลดหน้า
+        // ==========================================
+        window.onload = function() {
+            updateServosStatus();
+            loadFaces();
+            setInterval(updateServosStatus, 5000);
+        };
     </script>
 </body>
 </html>
