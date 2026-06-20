@@ -27,7 +27,19 @@
         /* Overlay หน้าจอโหลด */
         #loading-overlay {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center; flex-direction: column;
+            background: rgba(0,0,0,0.85); z-index: 9998; justify-content: center; align-items: center; flex-direction: column;
+        }
+
+        /* ระบบ Login Overlay หน้าเว็บ */
+        #auth-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: #000000; z-index: 9999;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .auth-card {
+            background-color: #1a1d20; padding: 2.5rem; border-radius: 12px;
+            border: 1px solid #0dcaf0; box-shadow: 0 0 30px rgba(13, 202, 240, 0.15);
+            width: 100%; max-width: 420px; text-align: center;
         }
 
         /* กล่องแสดง System Stats */
@@ -48,6 +60,23 @@
     </style>
 </head>
 <body>
+
+    <div id="auth-overlay">
+        <div class="auth-card">
+            <i class="fa-solid fa-shield-halved fa-4x text-info mb-4"></i>
+            <h4 class="text-white fw-bold mb-2">SYSTEM AUTHENTICATION</h4>
+            <p class="text-muted small mb-4">กรุณาระบุ Verification Code เพื่อปลดล็อกระบบ</p>
+            
+            <div class="mb-3 text-start">
+                <input type="password" id="auth-password" class="form-control form-control-lg bg-dark text-white border-secondary text-center fw-bold" placeholder="Enter Password" style="letter-spacing: 2px;">
+                <div id="auth-alert" class="text-danger mt-2 small d-none text-center fw-bold"><i class="fa-solid fa-triangle-exclamation"></i> ข้อมูลไม่ถูกต้อง (ต้องมีอย่างน้อย 4 ตัวอักษร)</div>
+            </div>
+            
+            <button onclick="checkAuth()" class="btn btn-info w-100 fw-bold shadow py-2 mt-2">
+                <i class="fa-solid fa-unlock"></i> UNLOCK SYSTEM
+            </button>
+        </div>
+    </div>
 
     <div id="loading-overlay">
         <div class="spinner-border text-info" style="width: 4rem; height: 4rem;" role="status"></div>
@@ -182,8 +211,9 @@
                     <div id="wifi-pwd-container" class="mb-3">
                         <label for="wifi-password" class="form-label">Password (รหัสผ่าน):</label>
                         <input type="password" class="form-control bg-dark text-light border-secondary" id="wifi-password" placeholder="Enter Wi-Fi Password">
+                        <div class="form-text text-secondary">รหัสผ่านต้องมีความยาวอย่างน้อย 4 ตัวอักษร</div>
                     </div>
-                    <div id="wifi-connect-alert" class="alert alert-danger d-none mt-2" role="alert"></div>
+                    <div id="wifi-connect-alert" class="alert alert-danger d-none mt-2 fw-bold small text-center" role="alert"></div>
                 </div>
                 <div class="modal-footer border-secondary">
                     <button type="button" class="btn btn-secondary" onclick="backToWifiList()">Back</button>
@@ -198,6 +228,38 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
+        // ==========================================
+        // ระบบ Authentication ป้องกันหน้าเว็บ
+        // ==========================================
+        function checkAuth() {
+            const pwd = document.getElementById('auth-password').value.trim();
+            const alertBox = document.getElementById('auth-alert');
+            
+            // กฎบังคับต้องกรอกอย่างน้อย 4 ตัวอักษร
+            if (pwd.length < 4) {
+                alertBox.classList.remove('d-none');
+            } else {
+                alertBox.classList.add('d-none');
+                // ปลดล็อก UI
+                document.getElementById('auth-overlay').style.display = 'none';
+                
+                // สามารถเพิ่มเติมการบันทึก Session ไว้ที่นี่ได้เพื่อไม่ต้องล็อกอินใหม่ทุกครั้ง
+                sessionStorage.setItem('is_authenticated', 'true');
+            }
+        }
+
+        // ตรวจสอบเมื่อมีการกดปุ่ม Enter ในช่องกรอกรหัสผ่าน
+        document.getElementById('auth-password').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') checkAuth();
+        });
+
+        // ตรวจสอบ Session ตอนโหลดหน้า
+        window.addEventListener('DOMContentLoaded', () => {
+            if (sessionStorage.getItem('is_authenticated') === 'true') {
+                document.getElementById('auth-overlay').style.display = 'none';
+            }
+        });
+
         // ==========================================
         // ระบบอัปเดตสถานะและแสกนเน็ตเวิร์ค
         // ==========================================
@@ -329,7 +391,7 @@
         }
 
         // ==========================================
-        // ระบบจัดการ Wi-Fi (เพิ่มใหม่)
+        // ระบบจัดการ Wi-Fi
         // ==========================================
         let currentSsid = '';
         let wifiModalInstance = null;
@@ -392,7 +454,6 @@
             document.getElementById('wifi-password').value = '';
             document.getElementById('wifi-connect-alert').classList.add('d-none');
             
-            // ถ้าไม่มี Security หรือเป็น '--' ให้ซ่อนช่องใส่รหัสผ่าน
             if (!security || security === '--') {
                 document.getElementById('wifi-pwd-container').style.display = 'none';
             } else {
@@ -415,10 +476,18 @@
             const alertBox = document.getElementById('wifi-connect-alert');
             
             const isPwdRequired = document.getElementById('wifi-pwd-container').style.display !== 'none';
-            if (isPwdRequired && !pwd) {
-                alertBox.innerText = "กรุณากรอกรหัสผ่าน Wi-Fi";
-                alertBox.classList.remove('d-none');
-                return;
+            if (isPwdRequired) {
+                if (!pwd) {
+                    alertBox.innerText = "กรุณากรอกรหัสผ่าน Wi-Fi";
+                    alertBox.classList.remove('d-none');
+                    return;
+                }
+                // บังคับความยาวขั้นต่ำของข้อมูลรหัสผ่าน
+                if (pwd.length < 4) {
+                    alertBox.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> รหัสผ่านต้องมีความยาวอย่างน้อย 4 ตัวอักษร';
+                    alertBox.classList.remove('d-none');
+                    return;
+                }
             }
 
             alertBox.classList.add('d-none');
@@ -438,7 +507,6 @@
                 if (data.status === 'ok') {
                     connectModalInstance.hide();
                     alert(`เชื่อมต่อ ${currentSsid} สำเร็จเรียบร้อยแล้ว!\nระบบอาจจะต้องรีเฟรชหน้าเว็บหรือเปลี่ยน IP หากได้รับการแจก IP ใหม่จากเราเตอร์`);
-                    // ปล่อยให้หน้าต่างโหลดใหม่เผื่อว่า IP เปลี่ยน
                     setTimeout(() => { window.location.reload(); }, 2000);
                 } else {
                     alertBox.innerText = `เชื่อมต่อไม่สำเร็จ: ${data.message}`;
