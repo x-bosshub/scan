@@ -10,21 +10,10 @@ import psutil
 import os
 import json
 import subprocess
+import math
 from gpiozero import AngularServo
 from gpiozero.pins.lgpio import LGPIOFactory
 from time import sleep
-
-# ==========================================
-# โหลดไลบรารี Face Recognition
-# ==========================================
-try:
-    import face_recognition
-    import numpy as np
-    face_rec_available = True
-    print("[SYSTEM] โหลดไลบรารี Face Recognition สำเร็จ")
-except ImportError:
-    face_rec_available = False
-    print("[WARNING] ไม่พบไลบรารี face_recognition หรือ numpy กรุณาติดตั้งเพื่อเปิดใช้งานระบบจดจำใบหน้า")
 
 # ==========================================
 # โหลดไลบรารี Telegram (Requests)
@@ -71,6 +60,13 @@ servos_config = {
 }
 
 CONFIG_FILE = 'servo_config.json'
+
+# ==========================================
+# AI SERVER CONFIGURATION
+# ==========================================
+AI_SERVER_URL = "http://157.85.107.42:5050/api/analyze"
+last_ai_send_time = 0
+AI_SEND_COOLDOWN = 2.0  # ระยะเวลาหน่วง (วินาที) ในการส่งภาพไปให้ AI ประมวลผล เพื่อไม่ให้เซิร์ฟเวอร์ทำงานหนักเกินไป
 
 # ==========================================
 # TELEGRAM NOTIFICATION SYSTEM
@@ -123,43 +119,6 @@ def send_telegram_alert(frame_img, message):
         print(f"[TELEGRAM] ส่งการแจ้งเตือนสำเร็จ: {message}")
     except Exception as e:
         print(f"[ERROR] ไม่สามารถส่ง Telegram ได้: {e}")
-
-# ==========================================
-# FACE RECOGNITION DATABASE & INIT
-# ==========================================
-FACE_DIR = 'dataset/faces'
-FACE_CONFIG = 'known_faces.json'
-known_face_encodings = []
-known_face_names = []
-
-if not os.path.exists(FACE_DIR):
-    os.makedirs(FACE_DIR)
-
-def load_known_faces():
-    global known_face_encodings, known_face_names
-    if not face_rec_available:
-        return
-        
-    known_face_encodings = []
-    known_face_names = []
-    
-    if os.path.exists(FACE_CONFIG):
-        try:
-            with open(FACE_CONFIG, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            for item in data:
-                name = item['name']
-                img_path = item['image_path']
-                if os.path.exists(img_path):
-                    image = face_recognition.load_image_file(img_path)
-                    encodings = face_recognition.face_encodings(image)
-                    if len(encodings) > 0:
-                        known_face_encodings.append(encodings[0])
-                        known_face_names.append(name)
-            print(f"[SYSTEM] โหลดข้อมูลใบหน้าสำเร็จ: จำนวน {len(known_face_names)} ใบหน้า")
-        except Exception as e:
-            print(f"[ERROR] ไม่สามารถโหลดไฟล์ข้อมูลใบหน้าได้: {e}")
 
 # ==========================================
 # AUTO SAVE/LOAD SYSTEM สำหรับ Servo
@@ -448,105 +407,101 @@ def quick_scan_host(ip):
     return None
 
 # ==========================================
-# PROCESS MOTION DETECTION (อัปเดตลดความเซนซิทีฟสำหรับ Outdoor)
+# COMMUNICATION WITH AI SERVER
 # ==========================================
+def send_frame_to_ai_server(frame_img):
+    if not requests_available:
+        return
+    try:
+        # เข้ารหัสภาพเพื่อลดขนาด
+        ret, buffer = cv2.imencode('.jpg', frame_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if not ret: return
+        
+        # ส่งแบบ multipart/form-data ตามที่ API AI ต้องการ
+        files = {'image': ('frame.jpg', buffer.tobytes(), 'image/jpeg')}
+        response = requests.post(AI_SERVER_URL, files=files, timeout=5)
+        
+        # ถ้าอยากให้ Pi พิมพ์ Log ผลการวิเคราะห์จาก AI สามารถเปิดดูได้ตรงนี้
+        # if response.status_code == 200:
+        #     data = response.json()
+        #     print(f"[AI SERVER] ผลการตรวจจับ: {data}")
+            
+    except requests.exceptions.RequestException as e:
+        print(f"[ERROR] ไม่สามารถส่งภาพไปยัง AI Server ได้: {e}")
+
+# ==========================================
+# PROCESS BASIC MOTION DETECTION (เปลี่ยนเป็นระบบจำพื้นหลัง Background Accumulator)
+# ==========================================
+motion_frame_count = 0
+MOTION_FRAME_THRESHOLD = 3  # หน่วงเวลาเล็กน้อยเพื่อรอให้คนเข้ามาในกล้อง
+
 def process_motion_detection(frame, previous_frame):
-    global last_alert_time, telegram_settings
+    global last_alert_time, telegram_settings, last_ai_send_time, motion_frame_count
     
     # ย่อสัดส่วนชั่วคราวเพื่อหาการเคลื่อนไหว
     small_frame = cv2.resize(frame, (500, int(500 * frame.shape[0] / frame.shape[1])))
     gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
     
-    # [จุดที่แก้ 1] เพิ่มการเบลอ (Gaussian Blur) จาก 21 เป็น 31 เพื่อลบรายละเอียดเล็กๆ เช่น ใบไม้ขยับ หรือสัญญาณภาพซ่า
-    gray = cv2.GaussianBlur(gray, (31, 31), 0)
+    # ลดเบลอลงเป็น 21 เพื่อให้จับโครงสร้างคนได้คมชัดขึ้น
+    gray = cv2.GaussianBlur(gray, (21, 21), 0)
 
+    # ถ้าเพิ่งเปิดกล้อง ให้จำภาพแรกเป็น "พื้นหลังว่างๆ" (เก็บเป็นค่า Float เพื่อการคำนวณที่แม่นยำ)
     if previous_frame is None:
-        return frame, gray
+        return frame, gray.copy().astype("float")
 
-    # หาความแตกต่างของเฟรม
-    frame_delta = cv2.absdiff(previous_frame, gray)
+    # อัปเดตพื้นหลังอย่างช้าๆ (ถ้ามีคนเดินเข้ามา ระบบจะยังมองว่าเป็นสิ่งแปลกปลอมบนพื้นหลัง)
+    cv2.accumulateWeighted(gray, previous_frame, 0.05)
     
-    # [จุดที่แก้ 2] เพิ่ม Threshold จาก 25 เป็น 40 (พิกเซลต้องมีสี/แสงต่างจากเดิมค่อนข้างชัดเจน ถึงจะนับว่าขยับ)
-    thresh = cv2.threshold(frame_delta, 40, 255, cv2.THRESH_BINARY)[1]
+    # หาความแตกต่างระหว่าง เฟรมปัจจุบัน กับ ภาพพื้นหลังว่างๆ ที่จำเอาไว้
+    frame_delta = cv2.absdiff(gray, cv2.convertScaleAbs(previous_frame))
+    
+    # ลดความเข้ม Threshold เป็น 25 ให้เซนเซอร์ไวต่อคนในที่แสงน้อยมากขึ้น
+    thresh = cv2.threshold(frame_delta, 25, 255, cv2.THRESH_BINARY)[1]
     thresh = cv2.dilate(thresh, None, iterations=2)
     contours, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     motion_detected = False
     for contour in contours:
-        # [จุดที่แก้ 3] เพิ่มขนาดวัตถุขั้นต่ำ จาก 1500 เป็น 5000 
-        # (ถ้าวัตถุเล็กกว่านี้ เช่น นกบินผ่านไกลๆ หรือกิ่งไม้ไหว จะถูกมองข้าม)
+        # บังคับวัตถุต้องมีขนาดใหญ่ (พื้นที่ > 5000)
         if cv2.contourArea(contour) < 5000:
             continue
             
         motion_detected = True
         (x, y, w, h) = cv2.boundingRect(contour)
         
-        # ขยายสเกลกลับไปวาดกรอบบนเฟรมจริง
+        # ขยายสเกลกลับไปวาดบนเฟรมจริง
         scale_x = frame.shape[1] / 500
         scale_y = frame.shape[0] / small_frame.shape[0]
         rx, ry, rw, rh = int(x * scale_x), int(y * scale_y), int(w * scale_x), int(h * scale_y)
         
-        # วาดกรอบสีเหลืองรอบวัตถุที่ขยับ (เพื่อให้เรารู้ว่ามันจับโดนอะไร)
         cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), (0, 255, 255), 2)
         cv2.putText(frame, "Motion Detected", (rx, ry - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
 
-    if motion_detected and telegram_settings["enabled"]:
+    if motion_detected:
+        motion_frame_count += 1
         current_time = time.time()
-        if current_time - last_alert_time > telegram_settings["cooldown"]:
-            msg = "🚨 ตรวจพบวัตถุเคลื่อนไหวหน้ากล้อง (Motion Detected)"
-            threading.Thread(target=send_telegram_alert, args=(frame.copy(), msg)).start()
-            last_alert_time = current_time
+        
+        # เช็คว่าเจอการเคลื่อนไหวต่อเนื่องถึงเกณฑ์ที่กำหนดหรือยัง
+        if motion_frame_count >= MOTION_FRAME_THRESHOLD:
+            # 1. จัดการส่งภาพไปยัง AI Server
+            if current_time - last_ai_send_time > AI_SEND_COOLDOWN:
+                threading.Thread(target=send_frame_to_ai_server, args=(frame.copy(),)).start()
+                last_ai_send_time = current_time
+                motion_frame_count = 0  # รีเซ็ตเพื่อรอจับจังหวะใหม่
 
-    return frame, gray
+            # 2. จัดการส่งแจ้งเตือน Telegram 
+            if telegram_settings["enabled"] and (current_time - last_alert_time > telegram_settings["cooldown"]):
+                msg = "🚨 ตรวจพบการเคลื่อนไหวหน้ากล้อง (ระบบกล้องกำลังส่งภาพให้ AI วิเคราะห์)"
+                threading.Thread(target=send_telegram_alert, args=(frame.copy(), msg)).start()
+                last_alert_time = current_time
+                motion_frame_count = 0
+    else:
+        # ถ้าไม่มีคนเดินแล้ว ให้ค่อยๆ ลดตัวนับลง
+        if motion_frame_count > 0:
+            motion_frame_count -= 1
 
-# ==========================================
-# PROCESS FACE DETECTION IN FRAME
-# ==========================================
-def process_face_recognition(frame):
-    global last_alert_time, telegram_settings
-    
-    if not face_rec_available:
-        return frame
-        
-    small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-    rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-    
-    face_locations = face_recognition.face_locations(rgb_small_frame)
-    face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
-    
-    faces_found = []
-    
-    for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-        top *= 4
-        right *= 4
-        bottom *= 4
-        left *= 4
-        
-        name = "Unknown"
-        
-        if len(known_face_encodings) > 0:
-            matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
-            face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
-            best_match_index = np.argmin(face_distances)
-            if matches[best_match_index]:
-                name = known_face_names[best_match_index]
-        
-        faces_found.append(name)
-        
-        cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0) if name != "Unknown" else (0, 0, 255), 2)
-        cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 255, 0) if name != "Unknown" else (0, 0, 255), cv2.FILLED)
-        font = cv2.FONT_HERSHEY_DUPLEX
-        cv2.putText(frame, name, (left + 6, bottom - 6), font, 0.8, (255, 255, 255), 1)
-        
-    if len(faces_found) > 0 and telegram_settings["enabled"]:
-        current_time = time.time()
-        if current_time - last_alert_time > telegram_settings["cooldown"]:
-            names_msg = ", ".join(faces_found)
-            msg = f"👤 ตรวจพบใบหน้าบุคคล: {names_msg}"
-            threading.Thread(target=send_telegram_alert, args=(frame.copy(), msg)).start()
-            last_alert_time = current_time
-
-    return frame
+    # ส่งคืนภาพพื้นหลัง (Float) กลับไปใช้เปรียบเทียบในรอบถัดไป
+    return frame, previous_frame
 
 # ==========================================
 # VIDEO STREAMING LOGIC
@@ -571,7 +526,6 @@ def generate_frames(rtsp_url):
             
             frame = cv2.resize(frame, (800, 450)) 
             frame, previous_frame = process_motion_detection(frame, previous_frame)
-            frame = process_face_recognition(frame)
             
             ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
             if not ret: continue
@@ -607,7 +561,6 @@ def generate_pi_frames():
                 
             frame = cv2.resize(frame, (800, 450))
             frame, previous_frame = process_motion_detection(frame, previous_frame)
-            frame = process_face_recognition(frame)
             
             ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
             if not ret: continue
@@ -736,58 +689,20 @@ def get_servos_status():
     })
 
 # ==========================================
-# FACE & TELEGRAM REGISTRATION API
+# DISABLE FACE REGISTRATION API (คืนค่าเพื่อไม่ให้หน้า HTML Error)
 # ==========================================
 
 @app.route('/api/face/register', methods=['POST'])
 def register_face():
-    if 'image' not in request.files or 'name' not in request.form:
-        return jsonify({"status": "error", "message": "ข้อมูลไม่ครบถ้วน (ต้องส่ง image และ name มาด้วย)"}), 400
-        
-    file = request.files['image']
-    name = request.form['name']
-    
-    if file.filename == '':
-        return jsonify({"status": "error", "message": "ไม่ได้เลือกไฟล์ภาพ"}), 400
-        
-    filename = f"{name.replace(' ', '_')}_{int(time.time())}.jpg"
-    filepath = os.path.join(FACE_DIR, filename)
-    
-    try:
-        file.save(filepath)
-        
-        data = []
-        if os.path.exists(FACE_CONFIG):
-            with open(FACE_CONFIG, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        
-        data.append({
-            "name": name,
-            "image_path": filepath,
-            "timestamp": int(time.time())
-        })
-        
-        with open(FACE_CONFIG, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-            
-        load_known_faces()
-        
-        return jsonify({"status": "ok", "message": f"บันทึกและตั้งชื่อใบหน้าเป็น {name} สำเร็จ", "file": filename})
-        
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"เกิดข้อผิดพลาดในการบันทึกภาพ: {str(e)}"}), 500
+    return jsonify({"status": "error", "message": "ระบบ AI ถูกปิดการใช้งาน เพื่อลดภาระเครื่อง"}), 400
 
 @app.route('/api/face/list', methods=['GET'])
 def list_faces():
-    if os.path.exists(FACE_CONFIG):
-        try:
-            with open(FACE_CONFIG, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            return jsonify({"status": "ok", "faces": data, "total": len(data)})
-        except Exception as e:
-            return jsonify({"status": "error", "message": str(e)}), 500
-            
     return jsonify({"status": "ok", "faces": [], "total": 0})
+
+# ==========================================
+# TELEGRAM SETUP API
+# ==========================================
 
 @app.route('/api/telegram/setup', methods=['POST'])
 def setup_telegram():
@@ -864,22 +779,27 @@ def index():
     return render_template('index.html', local_ip=local_ip, subnet=subnet)
 
 @app.route('/live')
-def index_live(): return render_template('live.html')
+def index_live():
+    return render_template('live.html')
 
 @app.route('/camera')
-def index_camera(): return render_template('camera.html')
+def index_camera():
+    return render_template('camera.html')
 
 @app.route('/servo')
-def index_servo(): return render_template('servo.html')
+def index_servo():
+    return render_template('servo.html')
 
 @app.route('/control')
-def index_control(): return render_template('control.html')
+def index_control():
+    return render_template('control.html')
 
 @app.route('/scan_network', methods=['POST'])
 def scan_network():
     data = request.json
     subnet = data.get('subnet')
-    if not subnet.endswith('.'): subnet += '.'
+    if not subnet.endswith('.'):
+        subnet += '.'
     with ThreadPoolExecutor(max_workers=100) as executor:
         ips = [f"{subnet}{i}" for i in range(1, 255)]
         results = list(filter(None, executor.map(quick_scan_host, ips)))
@@ -913,7 +833,6 @@ if __name__ == '__main__':
     try:
         load_servo_config()
         load_telegram_config()
-        load_known_faces()
         check_network_and_fallback()
         app.run(host='0.0.0.0', port=8000, debug=False, threaded=True)
     except KeyboardInterrupt:
